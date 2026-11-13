@@ -1,0 +1,8 @@
+{
+  "name": "வினை",
+  "description": "ADHD-friendly task and focus app that turns overwhelming tasks into tiny, doable next steps.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

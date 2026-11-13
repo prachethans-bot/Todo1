@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">வினை</string>
+    <string name="app_subtitle">Start smaller</string>
+    <string name="hero_content_desc">Stay Hard motivational poster</string>
+    <string name="brand_logo_desc">Vinai emblem</string>
+    <string name="alarm_channel_name">ADHD Gentle Alarms</string>
+    <string name="alarm_channel_desc">High-priority alarms with sound and vibration for your runway tasks</string>
+    <string name="alarm_permission_line">Quick one: allow notifications and exact alarms so your reminder rings on time, even when the phone is locked.</string>
+</resources>
