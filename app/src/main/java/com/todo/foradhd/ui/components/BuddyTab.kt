@@ -35,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,17 +43,11 @@ import androidx.compose.ui.unit.sp
 import com.todo.foradhd.data.BuddyActivity
 import com.todo.foradhd.data.BuddyState
 import com.todo.foradhd.ui.VinaiUiState
-import com.todo.foradhd.ui.theme.GlassBorder
-import com.todo.foradhd.ui.theme.GlassBorderStrong
 import com.todo.foradhd.ui.theme.GlassCard
 import com.todo.foradhd.ui.theme.GlassOutlineButton
 import com.todo.foradhd.ui.theme.ObsidianAtmosphereBackground
-import com.todo.foradhd.ui.theme.ObsidianInputBg
 import com.todo.foradhd.ui.theme.SilverPrimaryButton
-import com.todo.foradhd.ui.theme.TextMuted
-import com.todo.foradhd.ui.theme.TextOnSilver
-import com.todo.foradhd.ui.theme.TextPrimary
-import com.todo.foradhd.ui.theme.TextSecondary
+import com.todo.foradhd.ui.theme.VinaiTheme
 
 @Composable
 fun BuddyTab(
@@ -66,6 +59,7 @@ fun BuddyTab(
     onChangeSharing: (BuddyState) -> Unit,
     onOpenFriendToken: (String) -> Unit
 ) {
+    val colors = VinaiTheme.colors
     var friendLinkInput by remember { mutableStateOf("") }
 
     GlassCard(
@@ -84,7 +78,7 @@ fun BuddyTab(
                 horizontalArrangement = Arrangement.Center
             ) {
                 BuddyOrbitCircle("You")
-                Text("+", color = TextMuted, fontSize = 18.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                Text("+", color = colors.textMuted, fontSize = 18.sp, modifier = Modifier.padding(horizontal = 14.dp))
                 BuddyOrbitCircle("Buddy")
             }
 
@@ -110,19 +104,19 @@ fun BuddyTab(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("What should your buddy call you?", fontSize = 12.sp, color = TextPrimary)
+                    Text("What should your buddy call you?", fontSize = 12.sp, color = colors.textPrimary)
                     OutlinedTextField(
                         value = state.buddyNameInput,
                         onValueChange = onNameChange,
-                        placeholder = { Text("Your name", color = TextMuted) },
+                        placeholder = { Text("Your name", color = colors.textMuted) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = ObsidianInputBg,
-                            unfocusedContainerColor = ObsidianInputBg,
-                            focusedBorderColor = GlassBorderStrong,
-                            unfocusedBorderColor = GlassBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
+                            focusedContainerColor = colors.inputBg,
+                            unfocusedContainerColor = colors.inputBg,
+                            focusedBorderColor = colors.borderStrong,
+                            unfocusedBorderColor = colors.border,
+                            focusedTextColor = colors.textPrimary,
+                            unfocusedTextColor = colors.textPrimary
                         ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
@@ -138,7 +132,7 @@ fun BuddyTab(
                     ) {
                         Text(
                             text = if (state.buddyBusy) "Creating invite…" else "Create buddy invite",
-                            color = TextOnSilver,
+                            color = colors.onPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
@@ -146,7 +140,7 @@ fun BuddyTab(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            tint = TextOnSilver,
+                            tint = colors.onPrimary,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -160,8 +154,8 @@ fun BuddyTab(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0x0CFFFFFF))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                            .background(colors.subtleOverlay)
+                            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -171,8 +165,8 @@ fun BuddyTab(
                                 .size(9.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (buddy.state == BuddyState.ACTIVE) Color(0xFFE5E5E5)
-                                    else Color(0xFF999999)
+                                    if (buddy.state == BuddyState.ACTIVE) colors.accent
+                                    else colors.textMuted
                                 )
                         )
                         Column {
@@ -184,9 +178,9 @@ fun BuddyTab(
                                 },
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
+                                color = colors.textPrimary
                             )
-                            Text(buddy.ownerName, fontSize = 11.sp, color = TextMuted)
+                            Text(buddy.ownerName, fontSize = 11.sp, color = colors.textMuted)
                         }
                     }
 
@@ -199,11 +193,11 @@ fun BuddyTab(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = null,
-                            tint = TextOnSilver,
+                            tint = colors.onPrimary,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text("Share invite link", color = TextOnSilver, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Share invite link", color = colors.onPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
                     Row(
@@ -243,8 +237,8 @@ fun BuddyTab(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(15.dp))
-                    .background(Color(0x07FFFFFF))
-                    .border(1.dp, GlassBorder, RoundedCornerShape(15.dp))
+                    .background(colors.subtleOverlay)
+                    .border(1.dp, colors.border, RoundedCornerShape(15.dp))
                     .padding(16.dp)
             ) {
                 Text("TODAY'S CHECK-IN", style = MaterialTheme.typography.labelSmall)
@@ -253,13 +247,13 @@ fun BuddyTab(
                     text = "$completedCount small wins. Real progress.",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Medium,
-                    color = TextPrimary
+                    color = colors.textPrimary
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "I'm taking it one step at a time.",
                     fontSize = 12.sp,
-                    color = TextSecondary
+                    color = colors.textSecondary
                 )
             }
 
@@ -270,7 +264,7 @@ fun BuddyTab(
                     else "Configure Supabase environment keys in AI Studio Secrets to enable cloud buddy invitations."
                 },
                 fontSize = 11.sp,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 textAlign = TextAlign.Center,
                 lineHeight = 16.sp
             )
@@ -280,15 +274,15 @@ fun BuddyTab(
                 OutlinedTextField(
                     value = friendLinkInput,
                     onValueChange = { friendLinkInput = it },
-                    placeholder = { Text("Paste a friend's invite link or token", color = TextMuted) },
+                    placeholder = { Text("Paste a friend's invite link or token", color = colors.textMuted) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = ObsidianInputBg,
-                        unfocusedContainerColor = ObsidianInputBg,
-                        focusedBorderColor = GlassBorderStrong,
-                        unfocusedBorderColor = GlassBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                        focusedContainerColor = colors.inputBg,
+                        unfocusedContainerColor = colors.inputBg,
+                        focusedBorderColor = colors.borderStrong,
+                        unfocusedBorderColor = colors.border,
+                        focusedTextColor = colors.textPrimary,
+                        unfocusedTextColor = colors.textPrimary
                     ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
@@ -308,15 +302,16 @@ fun BuddyTab(
 
 @Composable
 private fun BuddyOrbitCircle(label: String) {
+    val colors = VinaiTheme.colors
     Box(
         modifier = Modifier
             .size(62.dp)
             .clip(CircleShape)
-            .background(Brush.radialGradient(listOf(Color(0x28FFFFFF), Color(0x04FFFFFF))))
-            .border(1.dp, Color(0x42FFFFFF), CircleShape),
+            .background(Brush.radialGradient(listOf(colors.subtleOverlay, colors.surface)))
+            .border(1.dp, colors.borderStrong, CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color(0xFFDEDEDE))
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = colors.textPrimary)
     }
 }
 
@@ -328,6 +323,7 @@ fun BuddyViewerScreen(
     onCheer: (String) -> Unit,
     onClose: () -> Unit
 ) {
+    val colors = VinaiTheme.colors
     val view = state.buddyViewData
     val name = view?.ownerName ?: "Your friend"
     val cheers = listOf("👏", "🔥", "💪", "❤️")
@@ -353,16 +349,16 @@ fun BuddyViewerScreen(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back to tasks",
-                                tint = TextSecondary
+                                tint = colors.textSecondary
                             )
                         }
                     }
 
                     Spacer(Modifier.height(14.dp))
                     when {
-                        !state.buddyViewLoaded -> Text("Loading…", color = TextSecondary, fontSize = 14.sp)
-                        view == null -> Text("This invite link isn't active anymore.", color = TextSecondary, fontSize = 14.sp)
-                        state.buddyViewDeclined -> Text("No problem. Thanks for stopping by. 💚", color = TextSecondary, fontSize = 14.sp)
+                        !state.buddyViewLoaded -> Text("Loading…", color = colors.textSecondary, fontSize = 14.sp)
+                        view == null -> Text("This invite link isn't active anymore.", color = colors.textSecondary, fontSize = 14.sp)
+                        state.buddyViewDeclined -> Text("No problem. Thanks for stopping by.", color = colors.textSecondary, fontSize = 14.sp)
                         view.state == BuddyState.PENDING && !state.buddyViewAccepted -> {
                             Text(
                                 text = "$name invited you to be their buddy.",
@@ -371,16 +367,16 @@ fun BuddyViewerScreen(
                             Spacer(Modifier.height(16.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 SilverPrimaryButton(onClick = onAccept, modifier = Modifier.weight(1f)) {
-                                    Text("Accept", color = TextOnSilver, fontWeight = FontWeight.Bold)
+                                    Text("Accept", color = colors.onPrimary, fontWeight = FontWeight.Bold)
                                 }
                                 GlassOutlineButton(onClick = onDecline, modifier = Modifier.weight(1f)) {
                                     Text("No thanks")
                                 }
                             }
                         }
-                        view.state == BuddyState.PENDING -> Text("Waiting for $name to get started.", color = TextSecondary, fontSize = 14.sp)
-                        !state.buddyViewAccepted -> Text("This invite has already been used.", color = TextSecondary, fontSize = 14.sp)
-                        view.state == BuddyState.PAUSED -> Text("Sharing is paused.", color = TextSecondary, fontSize = 14.sp)
+                        view.state == BuddyState.PENDING -> Text("Waiting for $name to get started.", color = colors.textSecondary, fontSize = 14.sp)
+                        !state.buddyViewAccepted -> Text("This invite has already been used.", color = colors.textSecondary, fontSize = 14.sp)
+                        view.state == BuddyState.PAUSED -> Text("Sharing is paused.", color = colors.textSecondary, fontSize = 14.sp)
                         else -> {
                             val left = (3 - view.cheersUsed).coerceAtLeast(0)
                             val canCheer = view.sessionId.isNotEmpty() && left > 0 && view.activity != BuddyActivity.IDLE
@@ -391,7 +387,7 @@ fun BuddyViewerScreen(
                                 BuddyActivity.IDLE -> ""
                             }
                             when (view.activity) {
-                                BuddyActivity.IDLE -> Text("$name isn't in a session right now.", color = TextSecondary, fontSize = 14.sp)
+                                BuddyActivity.IDLE -> Text("$name isn't in a session right now.", color = colors.textSecondary, fontSize = 14.sp)
                                 BuddyActivity.DONE -> Text("$name finished a task!", style = MaterialTheme.typography.headlineMedium)
                                 BuddyActivity.FOCUSING, BuddyActivity.BREAK -> Text(
                                     "$name is working on: ${view.taskLabel.ifBlank { "something" }}",
@@ -400,7 +396,7 @@ fun BuddyViewerScreen(
                             }
                             if (statusText.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text(statusText, fontSize = 12.sp, color = TextPrimary)
+                                Text(statusText, fontSize = 12.sp, color = colors.textPrimary)
                             }
                             if (canCheer) {
                                 Spacer(Modifier.height(16.dp))
@@ -417,7 +413,7 @@ fun BuddyViewerScreen(
                             }
                             if (state.buddyViewFeedback.isNotBlank()) {
                                 Spacer(Modifier.height(12.dp))
-                                Text(state.buddyViewFeedback, fontSize = 13.sp, color = TextSecondary)
+                                Text(state.buddyViewFeedback, fontSize = 13.sp, color = colors.textSecondary)
                             }
                         }
                     }

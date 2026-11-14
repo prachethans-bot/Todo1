@@ -21,11 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.todo.foradhd.ui.theme.RingLime
-import com.todo.foradhd.ui.theme.RingLimeMuted
-import com.todo.foradhd.ui.theme.RingTrack
-import com.todo.foradhd.ui.theme.TextMuted
-import com.todo.foradhd.ui.theme.TextPrimary
+import com.todo.foradhd.ui.theme.VinaiTheme
 import kotlinx.coroutines.delay
 import java.time.Instant
 
@@ -50,6 +46,7 @@ fun CountdownRing(
     modifier: Modifier = Modifier
 ) {
     if (reminderAt.isNullOrBlank()) return
+    val colors = VinaiTheme.colors
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(reminderAt) {
@@ -81,14 +78,14 @@ fun CountdownRing(
             Canvas(modifier = Modifier.size(112.dp)) {
                 val strokePx = 6.dp.toPx()
                 drawArc(
-                    color = RingTrack,
+                    color = colors.ringTrack,
                     startAngle = 0f,
                     sweepAngle = 360f,
                     useCenter = false,
                     style = Stroke(width = strokePx)
                 )
                 drawArc(
-                    color = if (isPassed) RingLimeMuted else RingLime,
+                    color = if (isPassed) colors.accentMuted else colors.accent,
                     startAngle = -90f,
                     sweepAngle = 360f * fraction,
                     useCenter = false,
@@ -100,7 +97,7 @@ fun CountdownRing(
                     Text(
                         text = text,
                         fontSize = 10.sp,
-                        color = TextMuted,
+                        color = colors.textMuted,
                         textAlign = TextAlign.Center,
                         lineHeight = 13.sp
                     )
@@ -109,13 +106,13 @@ fun CountdownRing(
                         text = text,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
+                        color = colors.textPrimary
                     )
                     if (sub.isNotEmpty()) {
                         Text(
                             text = sub,
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = colors.textMuted
                         )
                     }
                 }
@@ -127,17 +124,17 @@ fun CountdownRing(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Canvas(modifier = Modifier.size(26.dp)) {
+            Canvas(modifier = Modifier.size(24.dp)) {
                 val strokePx = 2.5.dp.toPx()
                 drawArc(
-                    color = RingTrack,
+                    color = colors.ringTrack,
                     startAngle = 0f,
                     sweepAngle = 360f,
                     useCenter = false,
                     style = Stroke(width = strokePx)
                 )
                 drawArc(
-                    color = if (isPassed) RingLimeMuted else RingLime,
+                    color = if (isPassed) colors.accentMuted else colors.accent,
                     startAngle = -90f,
                     sweepAngle = 360f * fraction,
                     useCenter = false,
@@ -147,7 +144,7 @@ fun CountdownRing(
             Text(
                 text = if (isPassed) text else "$text $sub".trim(),
                 fontSize = 11.sp,
-                color = if (isPassed) TextMuted else RingLime
+                color = if (isPassed) colors.textMuted else colors.accent
             )
         }
     }

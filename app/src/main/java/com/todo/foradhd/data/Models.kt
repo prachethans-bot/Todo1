@@ -13,6 +13,19 @@ enum class TaskMode(val label: String) {
     fun displayTag(): String = name.lowercase().replace('_', ' ')
 }
 
+enum class TaskCategory(val label: String) {
+    ALL("All"),
+    WORK("Work"),
+    PERSONAL("Personal"),
+    STUDY("Study"),
+    HEALTH("Health"),
+    ERRANDS("Errands");
+
+    companion object {
+        val assignable: List<TaskCategory> = listOf(WORK, PERSONAL, STUDY, HEALTH, ERRANDS)
+    }
+}
+
 @Serializable
 data class AlarmSettings(
     val enabled: Boolean = false,
@@ -43,18 +56,45 @@ data class SavedTask(
     val reminderAt: String? = null,   // ISO-8601 instant
     val estimateMinutes: Int? = null,
     val actualMinutes: Int? = null,
-    val progressNote: String = ""
+    val progressNote: String = "",
+    val requiresVerification: Boolean = false,
+    val category: String = "Personal",
+    val completedAt: String? = null
 )
 
+@Serializable
 enum class PlanStepKind { WORK, BREAK }
 
+@Serializable
 enum class PlanStatus { READY, RUNNING, PAUSED, STOPPED, FINISHED }
 
+@Serializable
 data class PlanStep(
     val id: String,
     val title: String,
     val minutes: Int,
-    val kind: PlanStepKind
+    val kind: PlanStepKind,
+    val description: String = "",
+    val completed: Boolean = false
+)
+
+@Serializable
+data class SavedBreakdownState(
+    val goal: String,
+    val totalMinutes: Int,
+    val steps: List<PlanStep>,
+    val status: PlanStatus,
+    val currentIndex: Int,
+    val stepRemainingMs: Long,
+    val parentTaskId: String? = null,
+    val strictTimeLimit: Boolean = false
+)
+
+@Serializable
+data class QuickNote(
+    val id: String,
+    val text: String,
+    val createdAt: String
 )
 
 @Serializable
@@ -109,6 +149,6 @@ data class UserSession(
 
 enum class AppTab(val label: String) {
     TODAY("Today"),
-    PLAN("Timed plan"),
-    BUDDY("My buddy")
+    PLAN("Timed Plan"),
+    BUDDY("My Buddy")
 }

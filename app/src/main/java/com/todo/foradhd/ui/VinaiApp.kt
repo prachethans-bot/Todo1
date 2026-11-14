@@ -15,11 +15,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,11 +37,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -51,16 +53,14 @@ import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,9 +68,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -89,34 +96,28 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.todo.foradhd.R
 import com.todo.foradhd.data.AppTab
-import com.todo.foradhd.data.AssistantResponse
 import com.todo.foradhd.data.SavedTask
-import com.todo.foradhd.data.TaskMode
+import com.todo.foradhd.data.TaskCategory
+import com.todo.foradhd.ui.components.AccountDialog
+import com.todo.foradhd.ui.components.AddEditTaskDialog
 import com.todo.foradhd.ui.components.BuddyTab
 import com.todo.foradhd.ui.components.BuddyViewerScreen
 import com.todo.foradhd.ui.components.ClockPickerDialog
 import com.todo.foradhd.ui.components.ComfortSettingsCard
 import com.todo.foradhd.ui.components.CountdownRing
+import com.todo.foradhd.ui.components.DailyProgressDonutCard
 import com.todo.foradhd.ui.components.FocusSessionDialog
 import com.todo.foradhd.ui.components.LoadingSplashOverlay
+import com.todo.foradhd.ui.components.QuickNotesSection
 import com.todo.foradhd.ui.components.RingingAlarmDialog
 import com.todo.foradhd.ui.components.TaskVerificationDialog
 import com.todo.foradhd.ui.components.TimedPlanTab
-import com.todo.foradhd.ui.components.AccountDialog
-import com.todo.foradhd.ui.theme.GlassBorder
-import com.todo.foradhd.ui.theme.GlassBorderStrong
+import com.todo.foradhd.ui.components.WeeklySummaryCard
 import com.todo.foradhd.ui.theme.GlassCard
-import com.todo.foradhd.ui.theme.GlassDivider
 import com.todo.foradhd.ui.theme.GlassOutlineButton
+import com.todo.foradhd.ui.theme.LiquidGlassSurface
 import com.todo.foradhd.ui.theme.ObsidianAtmosphereBackground
-import com.todo.foradhd.ui.theme.ObsidianInputBg
-import com.todo.foradhd.ui.theme.SilverPrimary
-import com.todo.foradhd.ui.theme.SilverPrimaryButton
-import com.todo.foradhd.ui.theme.SilverSecondary
-import com.todo.foradhd.ui.theme.TextMuted
-import com.todo.foradhd.ui.theme.TextOnSilver
-import com.todo.foradhd.ui.theme.TextPrimary
-import com.todo.foradhd.ui.theme.TextSecondary
+import com.todo.foradhd.ui.theme.VinaiTheme
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -141,6 +142,7 @@ private fun formatShortDate(iso: String): String {
 @Composable
 fun VinaiApp(viewModel: VinaiViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val colors = VinaiTheme.colors
     val context = LocalContext.current
 
     fun hasNotificationPermission(): Boolean {
@@ -151,7 +153,7 @@ fun VinaiApp(viewModel: VinaiViewModel) {
     var pendingAfterPermission by remember { mutableStateOf<(() -> Unit)?>(null) }
     val notificationLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
+    ) { _ ->
         val action = pendingAfterPermission
         pendingAfterPermission = null
         action?.invoke()
@@ -182,207 +184,278 @@ fun VinaiApp(viewModel: VinaiViewModel) {
         viewModel.selectTab(AppTab.TODAY)
     }
 
-    val activeTasks = remember(state.tasks) { state.tasks.filter { !it.completed } }
-    val completedTasks = remember(state.tasks) { state.tasks.filter { it.completed } }
-    val rightNowTask = remember(activeTasks) {
-        activeTasks.firstOrNull { !it.reminderAt.isNullOrBlank() } ?: activeTasks.firstOrNull()
+    val allActiveTasks = remember(state.tasks) { state.tasks.filter { !it.completed } }
+    val filteredActiveTasks = remember(allActiveTasks, state.selectedCategory) {
+        if (state.selectedCategory == TaskCategory.ALL.label) allActiveTasks
+        else allActiveTasks.filter { it.category.equals(state.selectedCategory, ignoreCase = true) }
     }
+    val completedTasks = remember(state.tasks) { state.tasks.filter { it.completed } }
     val activeFocusTask = remember(state.tasks, state.focusTaskId) {
         state.tasks.firstOrNull { it.id == state.focusTaskId }
     }
 
     ObsidianAtmosphereBackground {
         Box(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 600.dp)
-                ) {
-                    TopHeaderBar(
-                        today = state.todayFormatted,
-                        onToggleSettings = { viewModel.toggleSettings() },
-                        onOpenAccount = { viewModel.openAccountModal() }
-                    )
-
-                    WelcomeSection()
-
-                    HeroPosterCard(activeCount = activeTasks.size)
-
-                    StatsGrid(
-                        points = state.points,
-                        streak = state.streak,
-                        showedUpToday = state.lastDay == state.todayIsoKey
-                    )
-
-                    TabSelectorRow(
-                        selectedTab = state.tab,
-                        onSelectTab = { viewModel.selectTab(it) }
-                    )
-
-                    AnimatedVisibility(visible = state.settingsOpen) {
-                        ComfortSettingsCard(
-                            settings = state.rewardSettings,
-                            checkInFrequency = state.checkInFrequency,
-                            accountLabel = state.session?.let { "Signed in · ${it.email}" } ?: "Sign in / create account",
-                            onClose = { viewModel.closeSettings() },
-                            onUpdateSettings = { viewModel.updateRewardSetting(it) },
-                            onSelectFrequency = { viewModel.setCheckInFrequency(it) },
-                            onOpenAccount = { viewModel.openAccountModal() }
-                        )
-                    }
-
-                    when (state.tab) {
-                        AppTab.TODAY -> {
-                            QuickAddCard(
-                                taskInput = state.taskInput,
-                                mode = state.mode,
-                                reminderTime24 = state.reminderTime24,
-                                busy = state.assistantBusy,
-                                onTaskInputChange = { viewModel.updateTaskInput(it) },
-                                onSelectMode = { viewModel.selectMode(it) },
-                                onOpenClock = { viewModel.openClockPicker() },
-                                onClearReminder = { viewModel.clearReminderTime() },
-                                onFindStep = { viewModel.findNextStep() }
-                            )
-
-                            state.assistantResponse?.let { resp ->
-                                AssistantResultCard(
-                                    response = resp,
-                                    estimateMinutes = state.estimateMinutes,
-                                    onSelectEstimate = { viewModel.setEstimateMinutes(it) },
-                                    onSave = {
-                                        val hasReminder = !state.reminderAtIso.isNullOrBlank()
-                                        withNotificationPermission(hasReminder) {
-                                            viewModel.saveCurrentStep(hasNotificationPermission())
-                                        }
-                                    },
-                                    onDiscard = { viewModel.discardAssistantResult() }
+            Scaffold(
+                containerColor = Color.Transparent,
+                bottomBar = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        colors.background.copy(alpha = 0.55f),
+                                        colors.background.copy(alpha = 0.85f)
+                                    )
                                 )
-                            }
-
-                            if (state.notice.isNotBlank()) {
-                                Text(
-                                    text = state.notice,
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center,
-                                    lineHeight = 17.sp,
+                            )
+                            .navigationBarsPadding(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        if (state.tab == AppTab.TODAY) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .widthIn(max = 600.dp)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                LiquidGlassSurface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    baseTint = colors.pillBg,
+                                    blurRadius = 24.dp,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 6.dp)
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom
-                            ) {
-                                Column {
-                                    Text("YOUR RUNWAY", style = MaterialTheme.typography.labelSmall)
-                                    Spacer(Modifier.height(4.dp))
-                                    Text("Today's tasks", style = MaterialTheme.typography.headlineMedium)
-                                }
-                                Text(
-                                    text = "${completedTasks.size}/${state.tasks.size} done",
-                                    fontSize = 12.sp,
-                                    color = TextMuted
-                                )
-                            }
-
-                            if (rightNowTask != null) {
-                                RightNowCard(
-                                    task = rightNowTask,
-                                    onStartFocus = { viewModel.startTaskFromAlarm(rightNowTask) }
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                activeTasks.forEachIndexed { index, task ->
-                                    val isLeaving = task.id in state.leavingTaskIds
-                                    AnimatedVisibility(
-                                        visible = !isLeaving,
-                                        exit = slideOutHorizontally(tween(380)) { it / 2 } + fadeOut(tween(380))
+                                        .clickable { viewModel.openAddTaskSheet() }
+                                        .testTag("add_task_fab")
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 15.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        TaskItemCard(
-                                            index = index + 1,
-                                            task = task,
-                                            isFocused = task.id in state.focusedTasks,
-                                            floatingReward = state.floatingReward?.takeIf { it.first == task.id }?.second,
-                                            onVerify = { viewModel.openTaskVerification(task) },
-                                            onStartFocus = { viewModel.beginFocus(task) },
-                                            onSaveTimeNotes = { est, act -> viewModel.saveTimeFeedback(task, est, act) },
-                                            onDelete = { viewModel.deleteTask(task.id) }
+                                        Icon(
+                                            imageVector = Icons.Filled.Add,
+                                            contentDescription = null,
+                                            tint = colors.metallicStart,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "Add a Task",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.textPrimary
                                         )
                                     }
                                 }
-
-                                if (activeTasks.isEmpty()) {
-                                    EmptyTasksCard()
-                                }
-                            }
-
-                            if (completedTasks.isNotEmpty()) {
-                                CompletedTasksSection(completedTasks = completedTasks)
                             }
                         }
 
-                        AppTab.PLAN -> {
-                            TimedPlanTab(
-                                state = state,
-                                onGoalChange = { viewModel.updatePlanGoal(it) },
-                                onTotalMinutesChange = { viewModel.updatePlanTotalMinutes(it) },
-                                onCreatePlan = { viewModel.createTimedPlan() },
-                                onChangeStepMinutes = { idx, mins -> viewModel.changePlanStepMinutes(idx, mins) },
-                                onStartOrResume = {
-                                    withNotificationPermission(true) {
-                                        viewModel.startOrResumeTimedPlan(hasNotificationPermission())
-                                    }
-                                },
-                                onPause = { viewModel.pauseTimedPlan() },
-                                onSkip = { viewModel.skipTimedPlanStep() },
-                                onStop = { viewModel.stopTimedPlan() }
-                            )
-                        }
-
-                        AppTab.BUDDY -> {
-                            BuddyTab(
-                                state = state,
-                                completedCount = completedTasks.size,
-                                onNameChange = { viewModel.updateBuddyName(it) },
-                                onCreateInvite = { viewModel.createBuddyInvite(context) },
-                                onShareInvite = { viewModel.shareBuddyInvite(context) },
-                                onChangeSharing = { viewModel.changeBuddySharing(it) },
-                                onOpenFriendToken = { viewModel.openBuddyViewer(it) }
-                            )
-                        }
+                        BottomNavigationDock(
+                            selectedTab = state.tab,
+                            onSelectTab = { viewModel.selectTab(it) }
+                        )
                     }
-
-                    Text(
-                        text = "Your pace. Your space. Progress over pressure.",
-                        fontSize = 11.sp,
-                        color = TextMuted,
-                        textAlign = TextAlign.Center,
+                }
+            ) { innerPadding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .verticalScroll(rememberScrollState())
+                        .padding(top = 4.dp, bottom = innerPadding.calculateBottomPadding() + 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 26.dp)
-                    )
-                    Spacer(Modifier.height(64.dp))
+                            .widthIn(max = 600.dp)
+                    ) {
+                        TopHeaderBar(
+                            today = state.todayFormatted,
+                            onToggleSettings = { viewModel.toggleSettings() },
+                            onOpenAccount = { viewModel.openAccountModal() }
+                        )
+
+                        AnimatedVisibility(visible = state.settingsOpen) {
+                            ComfortSettingsCard(
+                                isDarkTheme = state.isDarkTheme,
+                                settings = state.rewardSettings,
+                                checkInFrequency = state.checkInFrequency,
+                                accountLabel = state.session?.let { "Signed in · ${it.email}" } ?: "Sign in / create account",
+                                onClose = { viewModel.closeSettings() },
+                                onToggleTheme = { viewModel.setDarkTheme(it) },
+                                onUpdateSettings = { viewModel.updateRewardSetting(it) },
+                                onSelectFrequency = { viewModel.setCheckInFrequency(it) },
+                                onOpenAccount = { viewModel.openAccountModal() }
+                            )
+                        }
+
+                        when (state.tab) {
+                            AppTab.TODAY -> {
+                                WelcomeSection()
+
+                                HeroArtworkSection(activeCount = allActiveTasks.size)
+
+                                DailyProgressDonutCard(
+                                    tasks = state.tasks,
+                                    planSteps = state.planSteps
+                                )
+
+                                StatsGrid(
+                                    points = state.points,
+                                    streak = state.streak,
+                                    showedUpToday = state.lastDay == state.todayIsoKey
+                                )
+
+                                if (state.notice.isNotBlank()) {
+                                    Text(
+                                        text = state.notice,
+                                        fontSize = 12.sp,
+                                        color = colors.textSecondary,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 17.sp,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Bottom
+                                ) {
+                                    Column {
+                                        Text("YOUR RUNWAY", style = MaterialTheme.typography.labelSmall)
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("Today's tasks", style = MaterialTheme.typography.headlineMedium)
+                                    }
+                                    Text(
+                                        text = "${completedTasks.size}/${state.tasks.size} done",
+                                        fontSize = 12.sp,
+                                        color = colors.textMuted
+                                    )
+                                }
+
+                                CategoryFilterBar(
+                                    selectedCategory = state.selectedCategory,
+                                    tasks = allActiveTasks,
+                                    onSelectCategory = { viewModel.selectCategory(it) }
+                                )
+
+                                Spacer(Modifier.height(8.dp))
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    filteredActiveTasks.forEachIndexed { index, task ->
+                                        val isLeaving = task.id in state.leavingTaskIds
+                                        AnimatedVisibility(
+                                            visible = !isLeaving,
+                                            exit = slideOutHorizontally(tween(320)) { it / 2 } + fadeOut(tween(320))
+                                        ) {
+                                            TaskItemCard(
+                                                index = index + 1,
+                                                task = task,
+                                                isFocused = task.id in state.focusedTasks,
+                                                floatingReward = state.floatingReward?.takeIf { it.first == task.id }?.second,
+                                                onCheckboxClick = { viewModel.onTaskCheckboxClicked(task) },
+                                                onEdit = { viewModel.openEditTaskSheet(task) },
+                                                onBreakDown = { viewModel.breakDownExistingTask(task) },
+                                                onStartFocus = { viewModel.beginFocus(task) },
+                                                onSaveTimeNotes = { est, act -> viewModel.saveTimeFeedback(task, est, act) },
+                                                onDelete = { viewModel.deleteTask(task.id) }
+                                            )
+                                        }
+                                    }
+
+                                    if (filteredActiveTasks.isEmpty()) {
+                                        EmptyTasksCard(filtered = state.selectedCategory != TaskCategory.ALL.label)
+                                    }
+                                }
+
+                                if (completedTasks.isNotEmpty()) {
+                                    CompletedTasksSection(completedTasks = completedTasks)
+                                }
+
+                                WeeklySummaryCard(
+                                    tasks = state.tasks,
+                                    streak = state.streak,
+                                    points = state.points
+                                )
+
+                                QuickNotesSection(
+                                    notes = state.quickNotes,
+                                    input = state.quickNoteInput,
+                                    onInputChange = { viewModel.updateQuickNoteInput(it) },
+                                    onAddNote = { viewModel.addQuickNote() },
+                                    onDeleteNote = { viewModel.deleteQuickNote(it) },
+                                    onPromoteToTask = { viewModel.convertQuickNoteToTask(it) }
+                                )
+                            }
+
+                            AppTab.PLAN -> {
+                                TimedPlanTab(
+                                    state = state,
+                                    onGoalChange = { viewModel.updatePlanGoal(it) },
+                                    onTotalMinutesChange = { viewModel.updatePlanTotalMinutes(it) },
+                                    onToggleStrictTime = { viewModel.togglePlanStrictTime(it) },
+                                    onCreatePlan = { viewModel.createTimedPlan() },
+                                    onRescalePlan = { viewModel.rescaleExistingPlan(it) },
+                                    onAddStep = { t, d, m -> viewModel.addPlanStep(t, d, m) },
+                                    onEditStep = { idx, t, d, m -> viewModel.editPlanStep(idx, t, d, m) },
+                                    onDeleteStep = { viewModel.deletePlanStep(it) },
+                                    onMoveStep = { idx, delta -> viewModel.movePlanStep(idx, delta) },
+                                    onToggleStepComplete = { idx ->
+                                        viewModel.completePlanStepAt(idx, hasNotificationPermission())
+                                    },
+                                    onCompleteCurrentStep = {
+                                        viewModel.completeCurrentPlanStep(hasNotificationPermission())
+                                    },
+                                    onStartOrResume = {
+                                        withNotificationPermission(true) {
+                                            viewModel.startOrResumeTimedPlan(hasNotificationPermission())
+                                        }
+                                    },
+                                    onPause = { viewModel.pauseTimedPlan() },
+                                    onSkip = { viewModel.skipTimedPlanStep() },
+                                    onStop = { viewModel.stopTimedPlan() }
+                                )
+                            }
+
+                            AppTab.BUDDY -> {
+                                BuddyTab(
+                                    state = state,
+                                    completedCount = completedTasks.size,
+                                    onNameChange = { viewModel.updateBuddyName(it) },
+                                    onCreateInvite = { viewModel.createBuddyInvite(context) },
+                                    onShareInvite = { viewModel.shareBuddyInvite(context) },
+                                    onChangeSharing = { viewModel.changeBuddySharing(it) },
+                                    onOpenFriendToken = { viewModel.openBuddyViewer(it) }
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Your pace. Your space. Progress over pressure.",
+                            fontSize = 11.sp,
+                            color = colors.textMuted,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 22.dp)
+                        )
+                    }
                 }
             }
 
@@ -391,7 +464,7 @@ fun VinaiApp(viewModel: VinaiViewModel) {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 18.dp),
+                    .padding(bottom = if (state.tab == AppTab.TODAY) 142.dp else 82.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -426,14 +499,35 @@ fun VinaiApp(viewModel: VinaiViewModel) {
             AnimatedVisibility(
                 visible = state.showSplash,
                 enter = fadeIn(),
-                exit = fadeOut(tween(400))
+                exit = fadeOut(tween(380))
             ) {
                 LoadingSplashOverlay()
             }
         }
     }
 
-    // Dialogs & full-screen overlays
+    // Add / Edit Task Modal
+    if (state.taskSheetOpen) {
+        AddEditTaskDialog(
+            state = state,
+            onTitleChange = { viewModel.updateTaskDraftTitle(it) },
+            onMicroStepChange = { viewModel.updateTaskDraftMicroStep(it) },
+            onSelectCategory = { viewModel.selectTaskDraftCategory(it) },
+            onToggleVerification = { viewModel.toggleTaskDraftRequiresVerification(it) },
+            onSelectEstimate = { viewModel.setTaskDraftEstimate(it) },
+            onOpenClock = { viewModel.openClockPicker() },
+            onClearReminder = { viewModel.clearReminderTime() },
+            onSuggestStep = { viewModel.generateMicroStepSuggestion() },
+            onSave = {
+                val hasReminder = !state.reminderAtIso.isNullOrBlank()
+                withNotificationPermission(hasReminder) {
+                    viewModel.saveTaskFromSheet(hasNotificationPermission())
+                }
+            },
+            onDismiss = { viewModel.closeTaskSheet() }
+        )
+    }
+
     if (state.clockPickerOpen) {
         ClockPickerDialog(
             initialTime24 = state.reminderTime24,
@@ -471,7 +565,7 @@ fun VinaiApp(viewModel: VinaiViewModel) {
             onTogglePause = { viewModel.toggleFocusPause() },
             onEndSession = {
                 viewModel.saveFocusDetailsToCloud()
-                viewModel.endFocus(saveQualified = true)
+                viewModel.endFocus(saveQualified = !state.focusStartedFromCheckoff)
             }
         )
     }
@@ -489,19 +583,24 @@ fun VinaiApp(viewModel: VinaiViewModel) {
     state.ringingAlarm?.let { alarm ->
         RingingAlarmDialog(
             alarm = alarm,
-            onSnooze = { viewModel.snoozeRingingAlarm() },
+            onSnooze = { mins -> viewModel.snoozeRingingAlarm(mins) },
             onStartFocus = { viewModel.startTaskFromAlarm() },
-            onDismiss = { viewModel.stopAlarmSound() }
+            onDismiss = { viewModel.dismissRingingAlarm() }
         )
     }
 }
 
+/**
+ * CHANGE 1: Plain-text header showing only "வினை" (no circular logo, no duplicate text, balanced layout).
+ */
 @Composable
 private fun TopHeaderBar(
     today: String,
     onToggleSettings: () -> Unit,
     onOpenAccount: () -> Unit
 ) {
+    val colors = VinaiTheme.colors
+    val iconRim = Brush.linearGradient(listOf(colors.glassBorderHighlight, colors.glassBorderShadow))
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -509,69 +608,42 @@ private fun TopHeaderBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black)
-                    .border(1.dp, GlassBorderStrong, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.vinai_launcher),
-                    contentDescription = stringResource(R.string.brand_logo_desc),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().padding(6.dp)
-                )
-            }
-            Column {
-                Text(
-                    text = stringResource(R.string.app_name),
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 28.sp,
-                    color = SilverPrimary
-                )
-                Text(today, fontSize = 12.sp, color = TextMuted)
-            }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.app_name),
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Black,
+                fontSize = 27.sp,
+                color = colors.metallicStart
+            )
+            Text(today, fontSize = 12.sp, color = colors.textMuted)
         }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFD6D6D6))
-            )
             IconButton(
                 onClick = onToggleSettings,
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color(0x0DFFFFFF))
-                    .border(1.dp, GlassBorder, CircleShape)
+                    .background(Brush.verticalGradient(listOf(colors.cardTop, colors.cardBottom)))
+                    .border(1.dp, iconRim, CircleShape)
                     .testTag("settings_button")
             ) {
-                Icon(Icons.Filled.Settings, contentDescription = "Comfort settings", tint = SilverPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Settings, contentDescription = "Comfort settings", tint = colors.primary, modifier = Modifier.size(18.dp))
             }
             IconButton(
                 onClick = onOpenAccount,
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color(0x0DFFFFFF))
-                    .border(1.dp, GlassBorder, CircleShape)
+                    .background(Brush.verticalGradient(listOf(colors.cardTop, colors.cardBottom)))
+                    .border(1.dp, iconRim, CircleShape)
                     .testTag("account_button")
             ) {
-                Icon(Icons.Filled.PersonOutline, contentDescription = "Account", tint = SilverPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.PersonOutline, contentDescription = "Account", tint = colors.primary, modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -579,17 +651,18 @@ private fun TopHeaderBar(
 
 @Composable
 private fun WelcomeSection() {
+    val colors = VinaiTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .padding(horizontal = 20.dp, vertical = 4.dp)
     ) {
         Text("YOUR PACE. YOUR SPACE.", style = MaterialTheme.typography.labelSmall)
         Spacer(Modifier.height(6.dp))
         Text(
             text = buildAnnotatedString {
                 append("Small steps.\n")
-                withStyle(SpanStyle(color = Color(0xFFC9C9C9))) {
+                withStyle(SpanStyle(color = colors.secondary)) {
                     append("Real momentum.")
                 }
             },
@@ -599,56 +672,99 @@ private fun WelcomeSection() {
         Text(
             text = "A little structure. No pressure to be perfect.",
             fontSize = 12.sp,
-            color = TextMuted
+            color = colors.textMuted
         )
         Spacer(Modifier.height(10.dp))
     }
 }
 
+/**
+ * CHANGE 3 & 4: Enhanced Kadinamaa Iru hero image blended seamlessly into the page background
+ * with radial gradient edge masking, zero hard borders, and subtle accent glow.
+ */
 @Composable
-private fun HeroPosterCard(activeCount: Int) {
+private fun HeroArtworkSection(activeCount: Int) {
+    val colors = VinaiTheme.colors
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(265.dp)
-            .padding(horizontal = 14.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.Black)
-            .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+            .height(275.dp)
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center
     ) {
+        // Diffused blurred metallic-silver liquid halo behind hero
+        Box(
+            modifier = Modifier
+                .size(250.dp)
+                .blur(radius = 28.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            colors.metallicStart.copy(alpha = 0.22f),
+                            colors.metallicEnd.copy(alpha = 0.08f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        // Hero artwork with soft edge fade mask melting black edges into the page
         Image(
-            painter = painterResource(R.drawable.stay_hard_hero),
+            painter = painterResource(R.drawable.img_kadinamaa_hero),
             contentDescription = stringResource(R.string.hero_content_desc),
             contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    val radius = size.minDimension * 0.58f
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            0.0f to Color.Black,
+                            0.80f to Color.Black,
+                            0.94f to Color.Black.copy(alpha = 0.55f),
+                            1.0f to Color.Transparent,
+                            center = Offset(size.width / 2f, size.height / 2f),
+                            radius = radius
+                        ),
+                        blendMode = BlendMode.DstIn
+                    )
+                }
         )
-        Column(
+
+        // Liquid glass floating active task counter
+        LiquidGlassSurface(
+            shape = RoundedCornerShape(14.dp),
+            baseTint = colors.glassBase,
+            blurRadius = 16.dp,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(10.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Brush.linearGradient(listOf(Color(0x38FFFFFF), Color(0xB8111111))))
-                .border(1.dp, GlassBorderStrong, RoundedCornerShape(12.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.End
+                .padding(end = 10.dp, bottom = 10.dp)
         ) {
-            Text(
-                text = activeCount.toString(),
-                fontSize = 23.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
-            )
-            Text("left today", fontSize = 10.sp, color = TextSecondary)
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = activeCount.toString(),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.metallicStart
+                )
+                Text("left today", fontSize = 10.sp, color = colors.textSecondary)
+            }
         }
     }
 }
 
 @Composable
 private fun StatsGrid(points: Int, streak: Int, showedUpToday: Boolean) {
+    val colors = VinaiTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         GlassCard(modifier = Modifier.weight(1f), cornerRadius = 20.dp) {
@@ -656,12 +772,12 @@ private fun StatsGrid(points: Int, streak: Int, showedUpToday: Boolean) {
                 Text("YOUR POINTS", style = MaterialTheme.typography.labelSmall)
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text("$points", fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = SilverPrimary)
+                    Text("$points", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = colors.primary)
                     Spacer(Modifier.width(4.dp))
-                    Text("pts", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.padding(bottom = 4.dp))
+                    Text("pts", fontSize = 12.sp, color = colors.textSecondary, modifier = Modifier.padding(bottom = 3.dp))
                 }
                 Spacer(Modifier.height(3.dp))
-                Text("Every small win counts", fontSize = 11.sp, color = TextMuted)
+                Text("Every small win counts", fontSize = 11.sp, color = colors.textMuted)
             }
         }
         GlassCard(modifier = Modifier.weight(1f), cornerRadius = 20.dp) {
@@ -672,19 +788,19 @@ private fun StatsGrid(points: Int, streak: Int, showedUpToday: Boolean) {
                     Icon(
                         imageVector = Icons.Filled.LocalFireDepartment,
                         contentDescription = null,
-                        tint = SilverPrimary,
+                        tint = colors.accent,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(Modifier.width(4.dp))
-                    Text("$streak", fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = SilverPrimary)
+                    Text("$streak", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = colors.primary)
                     Spacer(Modifier.width(4.dp))
-                    Text("days", fontSize = 12.sp, color = TextSecondary)
+                    Text("days", fontSize = 12.sp, color = colors.textSecondary)
                 }
                 Spacer(Modifier.height(3.dp))
                 Text(
                     text = if (showedUpToday) "You showed up today" else "A fresh start is waiting",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
             }
         }
@@ -692,325 +808,113 @@ private fun StatsGrid(points: Int, streak: Int, showedUpToday: Boolean) {
 }
 
 @Composable
-private fun TabSelectorRow(selectedTab: AppTab, onSelectTab: (AppTab) -> Unit) {
+private fun CategoryFilterBar(
+    selectedCategory: String,
+    tasks: List<SavedTask>,
+    onSelectCategory: (String) -> Unit
+) {
+    val colors = VinaiTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 14.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0x0BFFFFFF))
-            .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
-            .padding(5.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        AppTab.entries.forEach { tab ->
-            val selected = tab == selectedTab
+        TaskCategory.entries.forEach { cat ->
+            val count = if (cat == TaskCategory.ALL) tasks.size else tasks.count { it.category.equals(cat.label, ignoreCase = true) }
+            val active = selectedCategory.equals(cat.label, ignoreCase = true)
+            val pillBrush = if (active) {
+                Brush.linearGradient(listOf(colors.metallicStart, colors.metallicMid, colors.metallicEnd))
+            } else {
+                Brush.verticalGradient(listOf(colors.cardTop, colors.cardBottom))
+            }
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        if (selected) Brush.linearGradient(listOf(Color(0x2BFFFFFF), Color(0x0AFFFFFF)))
-                        else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(pillBrush)
+                    .border(
+                        1.dp,
+                        if (active) Brush.verticalGradient(listOf(Color(0xCCFFFFFF), colors.metallicEnd))
+                        else Brush.linearGradient(listOf(colors.glassBorderHighlight, colors.glassBorderShadow)),
+                        RoundedCornerShape(999.dp)
                     )
-                    .clickable { onSelectTab(tab) }
-                    .padding(vertical = 12.dp)
-                    .testTag("tab_${tab.name.lowercase()}"),
-                contentAlignment = Alignment.Center
+                    .clickable { onSelectCategory(cat.label) }
+                    .padding(horizontal = 13.dp, vertical = 8.dp)
+                    .testTag("filter_${cat.label.lowercase()}")
             ) {
                 Text(
-                    text = tab.label,
-                    fontSize = 12.sp,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (selected) Color.White else TextMuted
+                    text = if (count > 0) "${cat.label} ($count)" else cat.label,
+                    fontSize = 11.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                    color = if (active) colors.onPrimary else colors.textSecondary
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun QuickAddCard(
-    taskInput: String,
-    mode: TaskMode,
-    reminderTime24: String?,
-    busy: Boolean,
-    onTaskInputChange: (String) -> Unit,
-    onSelectMode: (TaskMode) -> Unit,
-    onOpenClock: () -> Unit,
-    onClearReminder: () -> Unit,
-    onFindStep: () -> Unit
+private fun BottomNavigationDock(
+    selectedTab: AppTab,
+    onSelectTab: (AppTab) -> Unit
 ) {
-    GlassCard(
+    val colors = VinaiTheme.colors
+    LiquidGlassSurface(
+        shape = RoundedCornerShape(24.dp),
+        baseTint = colors.navBarBg,
+        blurRadius = 24.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 4.dp),
-        cornerRadius = 20.dp
+            .widthIn(max = 600.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = taskInput,
-                onValueChange = onTaskInputChange,
-                placeholder = { Text("What needs your focus?", color = TextMuted) },
-                leadingIcon = {
-                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = SilverSecondary, modifier = Modifier.size(18.dp))
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("quick_add_input")
-            )
-
-            HorizontalDivider(color = GlassDivider)
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp, horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppTab.entries.forEach { tab ->
+                val selected = tab == selectedTab
+                val icon = when (tab) {
+                    AppTab.TODAY -> Icons.Filled.Home
+                    AppTab.PLAN -> Icons.Filled.Schedule
+                    AppTab.BUDDY -> Icons.Filled.Group
+                }
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0x66090909))
-                        .border(1.dp, Color(0x1CFFFFFF), RoundedCornerShape(12.dp))
-                        .clickable(onClick = onOpenClock)
-                        .padding(horizontal = 10.dp, vertical = 10.dp)
-                        .testTag("set_reminder_button")
-                ) {
-                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp))
-                    Text(
-                        text = reminderTime24?.let { formatTime12(it) } ?: "Set time",
-                        fontSize = 12.sp,
-                        color = SilverPrimary
-                    )
-                    if (reminderTime24 != null) {
-                        Text(
-                            text = "×",
-                            fontSize = 14.sp,
-                            color = TextMuted,
-                            modifier = Modifier
-                                .clickable(onClick = onClearReminder)
-                                .padding(start = 4.dp)
+                        .weight(1f)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (selected) Brush.verticalGradient(listOf(colors.cardTop, colors.subtleOverlay))
+                            else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
                         )
-                    }
-                }
-
-                SilverPrimaryButton(
-                    onClick = onFindStep,
-                    enabled = !busy && taskInput.isNotBlank(),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                    modifier = Modifier.testTag("find_step_button")
-                ) {
-                    Text(
-                        text = if (busy) "Thinking…" else "Find my next step",
-                        color = TextOnSilver,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                    if (!busy) {
-                        Spacer(Modifier.width(5.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            tint = TextOnSilver,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                TaskMode.entries.forEach { entry ->
-                    val active = entry == mode
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (active) Color(0x18FFFFFF) else Color(0x06FFFFFF))
-                            .border(
+                        .then(
+                            if (selected) Modifier.border(
                                 1.dp,
-                                if (active) Color(0x70CFCFCF) else Color(0x19FFFFFF),
-                                RoundedCornerShape(999.dp)
-                            )
-                            .clickable { onSelectMode(entry) }
-                            .padding(horizontal = 11.dp, vertical = 7.dp)
-                            .testTag("mode_${entry.name.lowercase()}")
-                    ) {
-                        Text(
-                            text = entry.label,
-                            fontSize = 11.sp,
-                            color = if (active) TextPrimary else TextMuted
+                                Brush.linearGradient(listOf(colors.glassBorderHighlight, colors.glassBorderShadow)),
+                                RoundedCornerShape(18.dp)
+                            ) else Modifier
                         )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AssistantResultCard(
-    response: AssistantResponse,
-    estimateMinutes: Int,
-    onSelectEstimate: (Int) -> Unit,
-    onSave: () -> Unit,
-    onDiscard: () -> Unit
-) {
-    var estimateMenuOpen by remember { mutableStateOf(false) }
-
-    GlassCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        cornerRadius = 21.dp,
-        borderColor = GlassBorderStrong
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = SilverSecondary, modifier = Modifier.size(14.dp))
-                Text("YOUR NEXT LITTLE STEP", style = MaterialTheme.typography.labelSmall)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(response.optimizedTaskTitle, style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0x0AFFFFFF))
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                    .padding(13.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("01", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
-                Text(response.theMicroStep, fontSize = 13.sp, lineHeight = 20.sp, color = TextPrimary)
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Text(response.dopamineHook, fontSize = 12.sp, color = Color(0xFFD1D1D1), lineHeight = 18.sp)
-            Spacer(Modifier.height(8.dp))
-            Text(response.timeGuessPrompt, fontSize = 12.sp, color = TextPrimary)
-            Spacer(Modifier.height(4.dp))
-            Text(response.timeFeedback, fontSize = 11.sp, color = TextMuted, lineHeight = 16.sp)
-
-            Spacer(Modifier.height(12.dp))
-            Text("My time estimate", fontSize = 11.sp, color = SilverSecondary)
-            Spacer(Modifier.height(6.dp))
-            Box {
-                GlassOutlineButton(
-                    onClick = { estimateMenuOpen = true },
-                    modifier = Modifier.fillMaxWidth()
+                        .clickable { onSelectTab(tab) }
+                        .padding(vertical = 8.dp)
+                        .testTag("tab_${tab.name.lowercase()}"),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    Text("$estimateMinutes ${if (estimateMinutes == 1) "minute" else "minutes"}", fontSize = 12.sp)
-                }
-                DropdownMenu(
-                    expanded = estimateMenuOpen,
-                    onDismissRequest = { estimateMenuOpen = false }
-                ) {
-                    listOf(1, 2, 5, 10, 15, 25, 45).forEach { mins ->
-                        DropdownMenuItem(
-                            text = { Text("$mins ${if (mins == 1) "minute" else "minutes"}") },
-                            onClick = {
-                                onSelectEstimate(mins)
-                                estimateMenuOpen = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                SilverPrimaryButton(
-                    onClick = onSave,
-                    modifier = Modifier.weight(1f).testTag("save_step_button")
-                ) {
-                    Text("Save this step", color = TextOnSilver, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = TextOnSilver, modifier = Modifier.size(16.dp))
-                }
-                TextButton(onClick = onDiscard, modifier = Modifier.testTag("discard_step_button")) {
-                    Text("Discard", color = TextSecondary, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RightNowCard(task: SavedTask, onStartFocus: () -> Unit) {
-    GlassCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 14.dp),
-        cornerRadius = 20.dp,
-        borderColor = Color(0x45FFFFFF)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("✳ RIGHT NOW", style = MaterialTheme.typography.labelSmall)
-                Text("Current focus", fontSize = 11.sp, color = TextMuted)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(task.title, style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(6.dp))
-            Text(task.microStep, fontSize = 12.sp, lineHeight = 18.sp, color = TextSecondary)
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (!task.reminderAt.isNullOrBlank()) {
-                    CountdownRing(
-                        reminderAt = task.reminderAt,
-                        createdAt = task.createdAt,
-                        isBig = false
-                    )
-                } else {
-                    Spacer(Modifier.width(1.dp))
-                }
-                SilverPrimaryButton(
-                    onClick = onStartFocus,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                    modifier = Modifier.testTag("right_now_start_focus")
-                ) {
-                    Text("Start focus", color = TextOnSilver, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Spacer(Modifier.width(5.dp))
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = null,
-                        tint = TextOnSilver,
-                        modifier = Modifier.size(15.dp)
+                        imageVector = icon,
+                        contentDescription = tab.label,
+                        tint = if (selected) colors.metallicStart else colors.textMuted,
+                        modifier = Modifier.size(21.dp)
+                    )
+                    Text(
+                        text = tab.label,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) colors.metallicStart else colors.textMuted
                     )
                 }
             }
@@ -1024,11 +928,14 @@ private fun TaskItemCard(
     task: SavedTask,
     isFocused: Boolean,
     floatingReward: String?,
-    onVerify: () -> Unit,
+    onCheckboxClick: () -> Unit,
+    onEdit: () -> Unit,
+    onBreakDown: () -> Unit,
     onStartFocus: () -> Unit,
     onSaveTimeNotes: (String, String) -> Unit,
     onDelete: () -> Unit
 ) {
+    val colors = VinaiTheme.colors
     var timeNotesOpen by remember { mutableStateOf(false) }
     var estimateDraft by remember(task.id, task.estimateMinutes) {
         mutableStateOf(task.estimateMinutes?.toString() ?: "")
@@ -1039,8 +946,8 @@ private fun TaskItemCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("task_item_${task.id}"),
-        cornerRadius = 17.dp,
-        borderColor = if (isFocused) GlassBorderStrong else GlassBorder,
+        cornerRadius = 18.dp,
+        borderColor = if (isFocused) colors.borderStrong else colors.border,
         contentPadding = PaddingValues(14.dp)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -1049,51 +956,78 @@ private fun TaskItemCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                // Checkbox button (48dp touch area)
+                // Circular Checkbox (48dp touch area)
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onVerify)
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onCheckboxClick)
                         .testTag("task_check_${task.id}"),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
                             .size(26.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x0DFFFFFF))
-                            .border(1.dp, Color(0xFF6A6A6A), RoundedCornerShape(8.dp))
+                            .clip(CircleShape)
+                            .background(colors.subtleOverlay)
+                            .border(1.5.dp, colors.textMuted, CircleShape)
                     )
                 }
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
                             text = index.toString().padStart(2, '0'),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TextMuted
+                            color = colors.textMuted
                         )
-                        Text(task.title, style = MaterialTheme.typography.titleMedium)
+                        Text(task.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     }
 
-                    Spacer(Modifier.height(5.dp))
-                    Text(task.microStep, fontSize = 12.sp, lineHeight = 18.sp, color = TextSecondary)
+                    Spacer(Modifier.height(4.dp))
+                    Text(task.microStep, fontSize = 12.sp, lineHeight = 17.sp, color = colors.textSecondary)
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(8.dp))
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Category badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colors.subtleOverlay)
+                                .border(1.dp, colors.border, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(task.category, fontSize = 10.sp, color = colors.textSecondary, fontWeight = FontWeight.Medium)
+                        }
+
+                        // Verification badge if enabled
+                        if (task.requiresVerification) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(colors.accentMuted)
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Filled.VerifiedUser, contentDescription = "Verification needed", tint = colors.accent, modifier = Modifier.size(11.dp))
+                                Text("Verify", fontSize = 10.sp, color = colors.accent, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
                         Text(
-                            text = "${formatShortDate(task.createdAt)} · ${task.mode.displayTag()}",
+                            text = formatShortDate(task.createdAt),
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = colors.textMuted
                         )
+
                         if (!task.reminderTime.isNullOrBlank()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1102,10 +1036,10 @@ private fun TaskItemCard(
                                 Icon(
                                     imageVector = Icons.Filled.NotificationsNone,
                                     contentDescription = null,
-                                    tint = TextMuted,
+                                    tint = colors.accent,
                                     modifier = Modifier.size(12.dp)
                                 )
-                                Text(formatTime12(task.reminderTime), fontSize = 10.sp, color = TextMuted)
+                                Text(formatTime12(task.reminderTime), fontSize = 10.sp, color = colors.accent, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
@@ -1121,22 +1055,36 @@ private fun TaskItemCard(
 
                     Spacer(Modifier.height(10.dp))
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(9.dp))
-                                .background(Color(0x0DFFFFFF))
-                                .border(1.dp, GlassBorder, RoundedCornerShape(9.dp))
+                                .background(colors.subtleOverlay)
+                                .border(1.dp, colors.border, RoundedCornerShape(9.dp))
                                 .clickable(onClick = onStartFocus)
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
                                 .testTag("start_focus_${task.id}")
                         ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = SilverPrimary, modifier = Modifier.size(14.dp))
-                            Text("Start focus", fontSize = 11.sp, color = Color(0xFFD0D0D0))
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = colors.primary, modifier = Modifier.size(13.dp))
+                            Text("Focus", fontSize = 11.sp, color = colors.textPrimary)
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(colors.subtleOverlay)
+                                .border(1.dp, colors.border, RoundedCornerShape(9.dp))
+                                .clickable(onClick = onBreakDown)
+                                .padding(horizontal = 9.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Filled.AccountTree, contentDescription = null, tint = colors.accent, modifier = Modifier.size(13.dp))
+                            Text("Steps", fontSize = 11.sp, color = colors.textPrimary)
                         }
 
                         Row(
@@ -1144,14 +1092,14 @@ private fun TaskItemCard(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(9.dp))
                                 .clickable { timeNotesOpen = !timeNotesOpen }
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                .padding(horizontal = 6.dp, vertical = 6.dp)
                         ) {
-                            Text("Time notes", fontSize = 11.sp, color = TextSecondary)
+                            Text("Time", fontSize = 11.sp, color = colors.textSecondary)
                             Icon(
                                 imageVector = if (timeNotesOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                                 contentDescription = null,
-                                tint = TextSecondary,
-                                modifier = Modifier.size(15.dp)
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }
@@ -1169,12 +1117,12 @@ private fun TaskItemCard(
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = ObsidianInputBg,
-                                        unfocusedContainerColor = ObsidianInputBg,
-                                        focusedBorderColor = GlassBorderStrong,
-                                        unfocusedBorderColor = GlassBorder,
-                                        focusedTextColor = TextPrimary,
-                                        unfocusedTextColor = TextPrimary
+                                        focusedContainerColor = colors.inputBg,
+                                        unfocusedContainerColor = colors.inputBg,
+                                        focusedBorderColor = colors.borderStrong,
+                                        unfocusedBorderColor = colors.border,
+                                        focusedTextColor = colors.textPrimary,
+                                        unfocusedTextColor = colors.textPrimary
                                     ),
                                     modifier = Modifier.weight(1f)
                                 )
@@ -1185,12 +1133,12 @@ private fun TaskItemCard(
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = ObsidianInputBg,
-                                        unfocusedContainerColor = ObsidianInputBg,
-                                        focusedBorderColor = GlassBorderStrong,
-                                        unfocusedBorderColor = GlassBorder,
-                                        focusedTextColor = TextPrimary,
-                                        unfocusedTextColor = TextPrimary
+                                        focusedContainerColor = colors.inputBg,
+                                        unfocusedContainerColor = colors.inputBg,
+                                        focusedBorderColor = colors.borderStrong,
+                                        unfocusedBorderColor = colors.border,
+                                        focusedTextColor = colors.textPrimary,
+                                        unfocusedTextColor = colors.textPrimary
                                     ),
                                     modifier = Modifier.weight(1f)
                                 )
@@ -1213,21 +1161,35 @@ private fun TaskItemCard(
                         Text(
                             text = "Estimate ${task.estimateMinutes ?: "—"} min · actual ${task.actualMinutes} min",
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = colors.textMuted
                         )
                     }
                 }
 
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.testTag("delete_task_${task.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.DeleteOutline,
-                        contentDescription = "Delete ${task.title}",
-                        tint = TextMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
+                // Edit & Delete icons (NO trailing arrow)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(36.dp).testTag("edit_task_${task.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "Edit ${task.title}",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(36.dp).testTag("delete_task_${task.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.DeleteOutline,
+                            contentDescription = "Delete ${task.title}",
+                            tint = colors.textMuted,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
 
@@ -1237,10 +1199,10 @@ private fun TaskItemCard(
                         .align(Alignment.TopStart)
                         .padding(start = 34.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFDDDDDD))
+                        .background(colors.primary)
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text(floatingReward, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111111))
+                    Text(floatingReward, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = colors.onPrimary)
                 }
             }
         }
@@ -1248,67 +1210,74 @@ private fun TaskItemCard(
 }
 
 @Composable
-private fun EmptyTasksCard() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .border(1.dp, Color(0x28FFFFFF), RoundedCornerShape(18.dp))
-            .padding(horizontal = 18.dp, vertical = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+private fun EmptyTasksCard(filtered: Boolean) {
+    val colors = VinaiTheme.colors
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 28.dp)
     ) {
-        Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = SilverSecondary, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(10.dp))
-        Text("Nothing waiting on you.", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-        Text("Add one tiny step whenever you're ready.", fontSize = 12.sp, color = TextMuted)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = colors.secondary, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = if (filtered) "No tasks in this category." else "Nothing waiting on you.",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("Tap + Add a Task below whenever you're ready.", fontSize = 12.sp, color = colors.textMuted)
+        }
     }
 }
 
 @Composable
 private fun CompletedTasksSection(completedTasks: List<SavedTask>) {
+    val colors = VinaiTheme.colors
     var expanded by remember { mutableStateOf(false) }
 
-    Column(
+    GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0x08FFFFFF))
-            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-            .clickable { expanded = !expanded }
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .clickable { expanded = !expanded },
+        cornerRadius = 16.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Completed · ${completedTasks.size}", fontSize = 12.sp, color = Color(0xFFBDBDBD))
-            Icon(
-                imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                tint = TextSecondary,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-        AnimatedVisibility(visible = expanded) {
-            Column(
-                modifier = Modifier.padding(top = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                completedTasks.take(10).forEach { task ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = SilverSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(task.title, fontSize = 12.sp, color = TextMuted)
+                Text("COMPLETED · ${completedTasks.size}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colors.textSecondary)
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = colors.textSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier.padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    completedTasks.take(10).forEach { task ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(task.title, fontSize = 12.sp, color = colors.textMuted)
+                        }
                     }
                 }
             }
@@ -1322,14 +1291,23 @@ private fun SilverPillToast(
     onClick: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
+    val colors = VinaiTheme.colors
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFFEEEEEE), Color(0xFFAAAAAA))))
-            .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(999.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(colors.metallicStart, colors.metallicMid, colors.metallicEnd, colors.metallicMid)
+                )
+            )
+            .border(
+                1.dp,
+                Brush.verticalGradient(listOf(Color(0xDDFFFFFF), colors.metallicEnd)),
+                RoundedCornerShape(999.dp)
+            )
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 18.dp, vertical = 12.dp)
     ) {
-        Text(text, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF101010))
+        Text(text, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.onPrimary)
     }
 }

@@ -18,7 +18,10 @@ data class TaskEntity(
     val reminderAt: String?,
     val estimateMinutes: Int?,
     val actualMinutes: Int?,
-    val progressNote: String
+    val progressNote: String,
+    val requiresVerification: Boolean = false,
+    val category: String = "Personal",
+    val completedAt: String? = null
 ) {
     fun toDomain(): SavedTask = SavedTask(
         id = id,
@@ -31,7 +34,10 @@ data class TaskEntity(
         reminderAt = reminderAt,
         estimateMinutes = estimateMinutes,
         actualMinutes = actualMinutes,
-        progressNote = progressNote
+        progressNote = progressNote,
+        requiresVerification = requiresVerification,
+        category = category.ifBlank { "Personal" },
+        completedAt = completedAt
     )
 
     companion object {
@@ -47,7 +53,10 @@ data class TaskEntity(
             reminderAt = task.reminderAt,
             estimateMinutes = task.estimateMinutes,
             actualMinutes = task.actualMinutes,
-            progressNote = task.progressNote
+            progressNote = task.progressNote,
+            requiresVerification = task.requiresVerification,
+            category = task.category.ifBlank { "Personal" },
+            completedAt = task.completedAt
         )
     }
 }

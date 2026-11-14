@@ -17,18 +17,25 @@ class AlarmReceiver : BroadcastReceiver() {
         val taskTitle = intent.getStringExtra(AlarmScheduler.EXTRA_TASK_TITLE) ?: "Time for your step"
         val repeatIndex = intent.getIntExtra(AlarmScheduler.EXTRA_REPEAT_INDEX, 0)
         val isPlanStep = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_PLAN_STEP, false)
+        val timeLabel = intent.getStringExtra(AlarmScheduler.EXTRA_TIME_LABEL)
         val requestCode = intent.getIntExtra("request_code", taskId.hashCode())
 
         AlarmScheduler.createNotificationChannel(context)
 
         val notifTitle = when {
-            isPlanStep && repeatIndex == 0 -> "Your focus step starts now"
-            isPlanStep -> "Timed plan · Next step"
-            repeatIndex == 0 -> "வினை · Time for your step"
+            isPlanStep -> "வினை · Subtask time finished"
+            repeatIndex == 0 && !timeLabel.isNullOrBlank() -> "வினை · Alarm ($timeLabel)"
+            repeatIndex == 0 -> "வினை · Task Alarm"
             else -> "வினை · Reminder (repeats every 5m)"
         }
 
-        val openPending = AlarmScheduler.buildOpenTaskIntent(context, taskId, taskTitle)
+        val notifBody = when {
+            isPlanStep -> "Allocated time finished for: $taskTitle. Ready to continue or move to the next step?"
+            !timeLabel.isNullOrBlank() -> "You have to $taskTitle at $timeLabel"
+            else -> "You have to $taskTitle now"
+        }
+
+        val openPending = AlarmScheduler.buildOpenTaskIntent(context, taskId, taskTitle, timeLabel)
         val canNotify = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
@@ -36,12 +43,14 @@ class AlarmReceiver : BroadcastReceiver() {
             val notification = NotificationCompat.Builder(context, AlarmScheduler.CHANNEL_ID)
                 .setSmallIcon(R.drawable.vinai_launcher)
                 .setContentTitle(notifTitle)
-                .setContentText(taskTitle)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setContentText(notifBody)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(notifBody))
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setSound(AlarmScheduler.getCustomSoundUri(context))
                 .setAutoCancel(true)
                 .setContentIntent(openPending)
-                .addAction(0, "Open task", openPending)
+                .addAction(0, if (isPlanStep) "Next step" else "Open task", openPending)
                 .build()
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -53,6 +62,7 @@ class AlarmReceiver : BroadcastReceiver() {
             putExtra(AlarmScheduler.EXTRA_TASK_ID, taskId)
             putExtra(AlarmScheduler.EXTRA_TASK_TITLE, taskTitle)
             putExtra(AlarmScheduler.EXTRA_IS_PLAN_STEP, isPlanStep)
+            if (!timeLabel.isNullOrBlank()) putExtra(AlarmScheduler.EXTRA_TIME_LABEL, timeLabel)
         }
         context.sendBroadcast(inAppIntent)
     }

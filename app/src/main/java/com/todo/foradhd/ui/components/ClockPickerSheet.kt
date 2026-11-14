@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -45,14 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.todo.foradhd.ui.theme.GlassBorder
+import com.todo.foradhd.ui.theme.ApplyDialogBlurBehind
 import com.todo.foradhd.ui.theme.GlassOutlineButton
-import com.todo.foradhd.ui.theme.RingLime
+import com.todo.foradhd.ui.theme.LiquidGlassSurface
 import com.todo.foradhd.ui.theme.SilverPrimaryButton
-import com.todo.foradhd.ui.theme.TextMuted
-import com.todo.foradhd.ui.theme.TextOnSilver
-import com.todo.foradhd.ui.theme.TextPrimary
-import com.todo.foradhd.ui.theme.TextSecondary
+import com.todo.foradhd.ui.theme.VinaiTheme
 import java.util.Calendar
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -68,6 +66,7 @@ fun ClockPickerDialog(
     onSet: (String) -> Unit,
     onCancel: () -> Unit
 ) {
+    val colors = VinaiTheme.colors
     val initValues = remember(initialTime24) {
         if (!initialTime24.isNullOrBlank() && ":" in initialTime24) {
             val parts = initialTime24.split(":")
@@ -94,32 +93,37 @@ fun ClockPickerDialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        ApplyDialogBlurBehind(blurRadiusPx = 46)
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .background(colors.modalScrim)
                 .padding(horizontal = 14.dp, vertical = 18.dp),
             contentAlignment = Alignment.BottomCenter
         ) {
-            Column(
+            LiquidGlassSurface(
+                shape = RoundedCornerShape(24.dp),
+                baseTint = colors.glassBase,
+                blurRadius = 24.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFF252525), Color(0xFF090909))))
-                    .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
-                    .padding(horizontal = 18.dp, vertical = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                 Box(
                     modifier = Modifier
                         .width(42.dp)
                         .height(4.dp)
                         .clip(RoundedCornerShape(9.dp))
-                        .background(Color(0xFF777777))
+                        .background(colors.textMuted)
                 )
                 Spacer(Modifier.height(16.dp))
 
-                // Digital readout header
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
@@ -130,7 +134,7 @@ fun ClockPickerDialog(
                         onClick = { step = DialStep.HOUR },
                         modifier = Modifier.testTag("clock_hour_digit")
                     )
-                    Text(":", fontSize = 28.sp, color = TextPrimary, modifier = Modifier.padding(horizontal = 4.dp))
+                    Text(":", fontSize = 28.sp, color = colors.textPrimary, modifier = Modifier.padding(horizontal = 4.dp))
                     TimeDigitBox(
                         text = minute.toString().padStart(2, '0'),
                         selected = step == DialStep.MINUTE,
@@ -141,7 +145,7 @@ fun ClockPickerDialog(
                     Text(
                         text = if (isPm) "PM" else "AM",
                         fontSize = 12.sp,
-                        color = TextSecondary,
+                        color = colors.textSecondary,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -150,12 +154,11 @@ fun ClockPickerDialog(
                 Text(
                     text = if (step == DialStep.HOUR) "Step 1: Pick the hour" else "Step 2: Pick the minutes",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = colors.textMuted
                 )
 
                 Spacer(Modifier.height(16.dp))
 
-                // Circular 260dp dial
                 val dialDp = 260.dp
                 val dialRadiusDp = 96.dp
                 val density = LocalDensity.current
@@ -182,7 +185,7 @@ fun ClockPickerDialog(
                     modifier = Modifier
                         .size(dialDp)
                         .clip(CircleShape)
-                        .background(Color(0x0DFFFFFF))
+                        .background(colors.subtleOverlay)
                         .pointerInput(step) {
                             detectTapGestures { offset ->
                                 updateFromOffset(offset, commitStep = true)
@@ -205,15 +208,15 @@ fun ClockPickerDialog(
                     val handEndY = centerPx + radiusPx * sin(angleRad).toFloat()
 
                     Canvas(modifier = Modifier.size(dialDp)) {
-                        drawCircle(color = RingLime, radius = 4.dp.toPx(), center = Offset(centerPx, centerPx))
+                        drawCircle(color = colors.accent, radius = 4.dp.toPx(), center = Offset(centerPx, centerPx))
                         drawLine(
-                            color = RingLime,
+                            color = colors.accent,
                             start = Offset(centerPx, centerPx),
                             end = Offset(handEndX, handEndY),
                             strokeWidth = 2.5.dp.toPx(),
                             cap = StrokeCap.Round
                         )
-                        drawCircle(color = RingLime, radius = 19.dp.toPx(), center = Offset(handEndX, handEndY))
+                        drawCircle(color = colors.accent, radius = 19.dp.toPx(), center = Offset(handEndX, handEndY))
                     }
 
                     val items = if (step == DialStep.HOUR) {
@@ -235,7 +238,7 @@ fun ClockPickerDialog(
                                 .offset { IntOffset(x.roundToInt(), y.roundToInt()) }
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(if (isSelected) Color(0xFFDDDDDD) else Color.Transparent)
+                                .background(if (isSelected) colors.primary else Color.Transparent)
                                 .clickable {
                                     if (step == DialStep.HOUR) {
                                         hour12 = value
@@ -253,7 +256,7 @@ fun ClockPickerDialog(
                                 text = if (step == DialStep.HOUR) value.toString() else value.toString().padStart(2, '0'),
                                 fontSize = 13.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Color(0xFF111111) else TextPrimary
+                                color = if (isSelected) colors.onPrimary else colors.textPrimary
                             )
                         }
                     }
@@ -261,7 +264,6 @@ fun ClockPickerDialog(
 
                 Spacer(Modifier.height(14.dp))
 
-                // AM / PM toggle
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -272,27 +274,28 @@ fun ClockPickerDialog(
 
                 Spacer(Modifier.height(18.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    GlassOutlineButton(
-                        onClick = onCancel,
-                        modifier = Modifier.weight(1f).testTag("clock_cancel_btn")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("Cancel")
-                    }
-                    SilverPrimaryButton(
-                        onClick = {
-                            var h24 = hour12 % 12
-                            if (isPm) h24 += 12
-                            val hh = h24.toString().padStart(2, '0')
-                            val mm = minute.toString().padStart(2, '0')
-                            onSet("$hh:$mm")
-                        },
-                        modifier = Modifier.weight(1f).testTag("clock_set_btn")
-                    ) {
-                        Text("Set", color = TextOnSilver, fontWeight = FontWeight.Bold)
+                        GlassOutlineButton(
+                            onClick = onCancel,
+                            modifier = Modifier.weight(1f).testTag("clock_cancel_btn")
+                        ) {
+                            Text("Cancel")
+                        }
+                        SilverPrimaryButton(
+                            onClick = {
+                                var h24 = hour12 % 12
+                                if (isPm) h24 += 12
+                                val hh = h24.toString().padStart(2, '0')
+                                val mm = minute.toString().padStart(2, '0')
+                                onSet("$hh:$mm")
+                            },
+                            modifier = Modifier.weight(1f).testTag("clock_set_btn")
+                        ) {
+                            Text("Set", color = colors.onPrimary, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -307,10 +310,12 @@ private fun TimeDigitBox(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = VinaiTheme.colors
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Color(0x1BFFFFFF) else Color.Transparent)
+            .background(if (selected) colors.subtleOverlay else Color.Transparent)
+            .border(1.dp, if (selected) colors.border else Color.Transparent, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
@@ -318,7 +323,7 @@ private fun TimeDigitBox(
             text = text,
             fontSize = 28.sp,
             fontWeight = FontWeight.Medium,
-            color = TextPrimary
+            color = colors.textPrimary
         )
     }
 }
@@ -330,14 +335,20 @@ private fun AmPmChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = VinaiTheme.colors
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Color(0x1BFFFFFF) else Color.Transparent)
-            .border(1.dp, if (selected) GlassBorder else Color(0x20FFFFFF), RoundedCornerShape(8.dp))
+            .background(if (selected) colors.primary else colors.subtleOverlay)
+            .border(1.dp, if (selected) colors.borderStrong else colors.border, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 10.dp)
     ) {
-        Text(label, fontSize = 12.sp, color = TextPrimary, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = if (selected) colors.onPrimary else colors.textPrimary,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+        )
     }
 }

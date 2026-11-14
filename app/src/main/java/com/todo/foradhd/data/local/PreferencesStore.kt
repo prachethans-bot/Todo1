@@ -3,7 +3,9 @@ package com.todo.foradhd.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.todo.foradhd.data.LocalBuddy
+import com.todo.foradhd.data.QuickNote
 import com.todo.foradhd.data.RewardSettings
+import com.todo.foradhd.data.SavedBreakdownState
 import com.todo.foradhd.data.UserSession
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -24,6 +26,10 @@ class PreferencesStore(context: Context) {
     var lastDay: String
         get() = prefs.getString("lastDay", "") ?: ""
         set(value) = prefs.edit().putString("lastDay", value).apply()
+
+    var isDarkTheme: Boolean
+        get() = prefs.getBoolean("isDarkTheme", true)
+        set(value) = prefs.edit().putBoolean("isDarkTheme", value).apply()
 
     var checkInFrequency: Int
         get() {
@@ -91,5 +97,24 @@ class PreferencesStore(context: Context) {
     fun saveSession(session: UserSession?) {
         if (session == null) prefs.edit().remove("session").apply()
         else prefs.edit().putString("session", json.encodeToString(session)).apply()
+    }
+
+    fun getQuickNotes(): List<QuickNote> {
+        val raw = prefs.getString("quickNotes", null) ?: return emptyList()
+        return runCatching { json.decodeFromString<List<QuickNote>>(raw) }.getOrDefault(emptyList())
+    }
+
+    fun saveQuickNotes(notes: List<QuickNote>) {
+        prefs.edit().putString("quickNotes", json.encodeToString(notes)).apply()
+    }
+
+    fun getBreakdownState(): SavedBreakdownState? {
+        val raw = prefs.getString("breakdownState", null) ?: return null
+        return runCatching { json.decodeFromString<SavedBreakdownState>(raw) }.getOrNull()
+    }
+
+    fun saveBreakdownState(state: SavedBreakdownState?) {
+        if (state == null) prefs.edit().remove("breakdownState").apply()
+        else prefs.edit().putString("breakdownState", json.encodeToString(state)).apply()
     }
 }

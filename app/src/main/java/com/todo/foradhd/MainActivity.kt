@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.todo.foradhd.notifications.AlarmReceiver
 import com.todo.foradhd.notifications.AlarmScheduler
 import com.todo.foradhd.ui.VinaiApp
@@ -24,7 +25,13 @@ class MainActivity : ComponentActivity() {
             val taskId = intent.getStringExtra(AlarmScheduler.EXTRA_TASK_ID)
             val title = intent.getStringExtra(AlarmScheduler.EXTRA_TASK_TITLE) ?: "Time for your step"
             val isPlanStep = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_PLAN_STEP, false)
-            viewModel.triggerRingingAlarm(title, if (isPlanStep) null else taskId)
+            val timeLabel = intent.getStringExtra(AlarmScheduler.EXTRA_TIME_LABEL)
+            viewModel.triggerRingingAlarm(
+                title = title,
+                taskId = if (isPlanStep) null else taskId,
+                timeLabel = timeLabel,
+                isPlanStep = isPlanStep
+            )
         }
     }
 
@@ -41,7 +48,8 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            VinaiTheme {
+            val state = viewModel.uiState.collectAsStateWithLifecycle()
+            VinaiTheme(isDark = state.value.isDarkTheme) {
                 VinaiApp(viewModel = viewModel)
             }
         }
@@ -69,7 +77,13 @@ class MainActivity : ComponentActivity() {
         val alarmTitle = intent.getStringExtra(AlarmScheduler.EXTRA_TASK_TITLE)
         if (!alarmTaskId.isNullOrBlank() && !alarmTitle.isNullOrBlank()) {
             val isPlan = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_PLAN_STEP, false)
-            viewModel.triggerRingingAlarm(alarmTitle, if (isPlan) null else alarmTaskId)
+            val timeLabel = intent.getStringExtra(AlarmScheduler.EXTRA_TIME_LABEL)
+            viewModel.triggerRingingAlarm(
+                title = alarmTitle,
+                taskId = if (isPlan) null else alarmTaskId,
+                timeLabel = timeLabel,
+                isPlanStep = isPlan
+            )
         }
     }
 }

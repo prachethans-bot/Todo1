@@ -36,9 +36,14 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 class SupabaseApi {
-    private val baseUrl: String = BuildConfig.VITE_SUPABASE_URL.trim().trimEnd('/')
-    private val anonKey: String = BuildConfig.VITE_SUPABASE_ANON_KEY.trim()
-    private val publicUrl: String = BuildConfig.VITE_PUBLIC_URL.trim().trimEnd('/')
+    private fun cleanSecret(raw: String): String {
+        val trimmed = raw.trim().trim('"')
+        return if (trimmed.equals("UNSET", ignoreCase = true) || trimmed.startsWith("YOUR_")) "" else trimmed
+    }
+
+    private val baseUrl: String = cleanSecret(BuildConfig.VITE_SUPABASE_URL).trimEnd('/')
+    private val anonKey: String = cleanSecret(BuildConfig.VITE_SUPABASE_ANON_KEY)
+    private val publicUrl: String = cleanSecret(BuildConfig.VITE_PUBLIC_URL).trimEnd('/')
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 

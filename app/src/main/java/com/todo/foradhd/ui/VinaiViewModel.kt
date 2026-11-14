@@ -16,7 +16,10 @@ import com.todo.foradhd.data.BuddyViewData
 import com.todo.foradhd.data.LocalBuddy
 import com.todo.foradhd.data.PlanStatus
 import com.todo.foradhd.data.PlanStep
+import com.todo.foradhd.data.PlanStepKind
+import com.todo.foradhd.data.QuickNote
 import com.todo.foradhd.data.RewardSettings
+import com.todo.foradhd.data.SavedBreakdownState
 import com.todo.foradhd.data.SavedTask
 import com.todo.foradhd.data.TaskMode
 import com.todo.foradhd.data.UserSession
@@ -44,7 +47,9 @@ import java.util.UUID
 
 data class RingingAlarmState(
     val title: String,
-    val taskId: String? = null
+    val taskId: String? = null,
+    val timeLabel: String? = null,
+    val isPlanStep: Boolean = false
 )
 
 data class LastRewardInfo(
@@ -55,6 +60,7 @@ data class LastRewardInfo(
 
 data class VinaiUiState(
     val showSplash: Boolean = true,
+    val isDarkTheme: Boolean = true,
     val tab: AppTab = AppTab.TODAY,
     val todayFormatted: String = "",
     val todayIsoKey: String = "",
@@ -65,15 +71,23 @@ data class VinaiUiState(
     val authBusy: Boolean = false,
     val authMessage: String = "",
 
-    // Quick add & assistant
-    val taskInput: String = "",
-    val mode: TaskMode = TaskMode.NEW_TASK,
-    val assistantBusy: Boolean = false,
-    val assistantResponse: AssistantResponse? = null,
-    val estimateMinutes: Int = 2,
+    // Category filter
+    val selectedCategory: String = "All",
+
+    // Add / Edit Task sheet
+    val taskSheetOpen: Boolean = false,
+    val editingTask: SavedTask? = null,
+    val taskDraftTitle: String = "",
+    val taskDraftMicroStep: String = "",
+    val taskDraftCategory: String = "Personal",
+    val taskDraftCategoryManual: Boolean = false,
+    val taskDraftRequiresVerification: Boolean = false,
+    val taskDraftEstimateMinutes: Int = 10,
     val reminderTime24: String? = null,
     val reminderAtIso: String? = null,
     val clockPickerOpen: Boolean = false,
+    val assistantBusy: Boolean = false,
+    val assistantResponse: AssistantResponse? = null,
     val notice: String = "",
 
     // Tasks
@@ -107,19 +121,26 @@ data class VinaiUiState(
     val focusElapsedSeconds: Int = 0,
     val focusPaused: Boolean = false,
     val focusQualified: Boolean = false,
+    val focusStartedFromCheckoff: Boolean = false,
     val focusMicroStep: String = "",
     val focusProgressNote: String = "",
     val checkInOpen: Boolean = false,
     val checkInExpired: Boolean = false,
 
-    // Timed plan
+    // Timed plan / AI Task Breakdown
     val planGoal: String = "",
     val planTotalMinutes: Int = 120,
+    val planStrictTimeLimit: Boolean = false,
+    val planParentTaskId: String? = null,
     val planSteps: List<PlanStep> = emptyList(),
     val planStatus: PlanStatus = PlanStatus.READY,
     val planCurrentIndex: Int = 0,
     val planStepRemainingMs: Long = 0L,
     val planNotice: String = "",
+
+    // Quick Notes
+    val quickNotes: List<QuickNote> = emptyList(),
+    val quickNoteInput: String = "",
 
     // Buddy
     val buddy: LocalBuddy? = null,
@@ -157,7 +178,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
     private var undoHideJob: Job? = null
 
     private var planStepStartedAtMs: Long = 0L
-    private var planPausedElapsedMs: Long = 0L
+    private var planStepBaseDurationMs: Long = 0L
     private var scheduledPlanIds: List<Int> = emptyList()
 
     private var undoStreakSnapshot: Pair<Int, String>? = null
@@ -167,19 +188,26 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
     init {
         AlarmScheduler.createNotificationChannel(appContext)
         viewModelScope.launch {
-            delay(1500L)
+            delay(1350L)
             _uiState.update { it.copy(showSplash = false) }
         }
         observeTasksForCurrentUser()
         syncRemoteTasksIfSignedIn()
         startBuddyOwnerPollingIfNeeded()
+        resumePersistedBreakdownTickerIfNeeded()
     }
 
     private fun createInitialState(): VinaiUiState {
         val now = LocalDate.now()
-        val formattedDate = DateTimeFormatter.ofPattern("EEEE, MMMM d").format(now)
+        val formattedDate = DateTimeFormatter.ofPattern("EEE, MMM d").format(now)
         val todayKey = DateTimeFormatter.ISO_LOCAL_DATE.format(now)
+        val savedPlan = prefs.getBreakdownState()
+        val restoredStatus = when (savedPlan?.status) {
+            PlanStatus.RUNNING -> PlanStatus.PAUSED // Safe resume after process kill
+            else -> savedPlan?.status ?: PlanStatus.READY
+        }
         return VinaiUiState(
+            isDarkTheme = prefs.isDarkTheme,
             todayFormatted = formattedDate,
             todayIsoKey = todayKey,
             session = prefs.getSession(),
@@ -191,9 +219,48 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             checkInFrequency = prefs.checkInFrequency,
             focusedTasks = prefs.getFocusedTasks(),
             qualifiedFocusTasks = prefs.getQualifiedFocusTasks(),
+            quickNotes = prefs.getQuickNotes(),
+            planGoal = savedPlan?.goal ?: "",
+            planTotalMinutes = savedPlan?.totalMinutes ?: 120,
+            planStrictTimeLimit = savedPlan?.strictTimeLimit ?: false,
+            planParentTaskId = savedPlan?.parentTaskId,
+            planSteps = savedPlan?.steps ?: emptyList(),
+            planStatus = restoredStatus,
+            planCurrentIndex = savedPlan?.currentIndex ?: 0,
+            planStepRemainingMs = savedPlan?.stepRemainingMs ?: 0L,
+            planNotice = if (savedPlan != null && savedPlan.steps.isNotEmpty() && restoredStatus == PlanStatus.PAUSED) {
+                "Your unfinished breakdown is saved. Tap Resume to pick up where you left off."
+            } else "",
             buddy = prefs.getLocalBuddy(),
             buddyNameInput = prefs.buddyOwnerName
         )
+    }
+
+    private fun resumePersistedBreakdownTickerIfNeeded() {
+        val s = _uiState.value
+        if (s.planSteps.isNotEmpty() && s.planStepRemainingMs > 0L) {
+            planStepBaseDurationMs = s.planStepRemainingMs
+        }
+    }
+
+    private fun persistBreakdownState() {
+        val s = _uiState.value
+        if (s.planSteps.isEmpty() && s.planGoal.isBlank()) {
+            prefs.saveBreakdownState(null)
+        } else {
+            prefs.saveBreakdownState(
+                SavedBreakdownState(
+                    goal = s.planGoal,
+                    totalMinutes = s.planTotalMinutes,
+                    steps = s.planSteps,
+                    status = s.planStatus,
+                    currentIndex = s.planCurrentIndex,
+                    stepRemainingMs = s.planStepRemainingMs,
+                    parentTaskId = s.planParentTaskId,
+                    strictTimeLimit = s.planStrictTimeLimit
+                )
+            )
+        }
     }
 
     private fun observeTasksForCurrentUser() {
@@ -215,8 +282,13 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             val byId = local.associateBy { it.id }.toMutableMap()
             remote.forEach { entry ->
                 val existing = byId[entry.id]
-                byId[entry.id] = if (existing != null && existing.progressNote.isNotBlank() && entry.progressNote.isBlank()) {
-                    entry.copy(progressNote = existing.progressNote)
+                byId[entry.id] = if (existing != null) {
+                    entry.copy(
+                        progressNote = existing.progressNote.ifBlank { entry.progressNote },
+                        requiresVerification = existing.requiresVerification,
+                        category = existing.category,
+                        completedAt = existing.completedAt
+                    )
                 } else {
                     entry
                 }
@@ -228,6 +300,21 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectTab(tab: AppTab) {
         _uiState.update { it.copy(tab = tab) }
+    }
+
+    fun toggleTheme() {
+        val next = !_uiState.value.isDarkTheme
+        prefs.isDarkTheme = next
+        _uiState.update { it.copy(isDarkTheme = next) }
+    }
+
+    fun setDarkTheme(dark: Boolean) {
+        prefs.isDarkTheme = dark
+        _uiState.update { it.copy(isDarkTheme = dark) }
+    }
+
+    fun selectCategory(category: String) {
+        _uiState.update { it.copy(selectedCategory = category) }
     }
 
     fun toggleSettings() {
@@ -297,12 +384,86 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateTaskInput(text: String) {
-        _uiState.update { it.copy(taskInput = text) }
+    // Add / Edit Task Sheet
+    fun openAddTaskSheet(initialTitle: String = "") {
+        val autoTag = if (initialTitle.isNotBlank()) AssistantFallback.autoTagTask(initialTitle) else "Personal"
+        _uiState.update {
+            it.copy(
+                taskSheetOpen = true,
+                editingTask = null,
+                taskDraftTitle = initialTitle,
+                taskDraftMicroStep = "",
+                taskDraftCategory = autoTag,
+                taskDraftCategoryManual = false,
+                taskDraftRequiresVerification = false,
+                taskDraftEstimateMinutes = 10,
+                reminderTime24 = null,
+                reminderAtIso = null,
+                assistantResponse = null
+            )
+        }
     }
 
-    fun selectMode(mode: TaskMode) {
-        _uiState.update { it.copy(mode = mode) }
+    fun openEditTaskSheet(task: SavedTask) {
+        _uiState.update {
+            it.copy(
+                taskSheetOpen = true,
+                editingTask = task,
+                taskDraftTitle = task.title,
+                taskDraftMicroStep = task.microStep,
+                taskDraftCategory = task.category,
+                taskDraftCategoryManual = true,
+                taskDraftRequiresVerification = task.requiresVerification,
+                taskDraftEstimateMinutes = task.estimateMinutes ?: 10,
+                reminderTime24 = task.reminderTime,
+                reminderAtIso = task.reminderAt,
+                assistantResponse = null
+            )
+        }
+    }
+
+    fun closeTaskSheet() {
+        _uiState.update {
+            it.copy(
+                taskSheetOpen = false,
+                editingTask = null,
+                assistantResponse = null
+            )
+        }
+    }
+
+    fun updateTaskDraftTitle(text: String) {
+        _uiState.update { cur ->
+            val nextCategory = if (cur.taskDraftCategoryManual) {
+                cur.taskDraftCategory
+            } else {
+                AssistantFallback.autoTagTask(text, cur.taskDraftMicroStep)
+            }
+            cur.copy(taskDraftTitle = text, taskDraftCategory = nextCategory)
+        }
+    }
+
+    fun updateTaskDraftMicroStep(text: String) {
+        _uiState.update { cur ->
+            val nextCategory = if (cur.taskDraftCategoryManual) {
+                cur.taskDraftCategory
+            } else {
+                AssistantFallback.autoTagTask(cur.taskDraftTitle, text)
+            }
+            cur.copy(taskDraftMicroStep = text, taskDraftCategory = nextCategory)
+        }
+    }
+
+    fun selectTaskDraftCategory(category: String) {
+        _uiState.update { it.copy(taskDraftCategory = category, taskDraftCategoryManual = true) }
+    }
+
+    fun toggleTaskDraftRequiresVerification(required: Boolean) {
+        _uiState.update { it.copy(taskDraftRequiresVerification = required) }
+    }
+
+    fun setTaskDraftEstimate(minutes: Int) {
+        _uiState.update { it.copy(taskDraftEstimateMinutes = minutes) }
     }
 
     fun openClockPicker() {
@@ -328,92 +489,102 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(reminderTime24 = null, reminderAtIso = null) }
     }
 
-    fun setEstimateMinutes(minutes: Int) {
-        _uiState.update { it.copy(estimateMinutes = minutes) }
-    }
-
-    fun findNextStep() {
-        val title = _uiState.value.taskInput.trim()
+    fun generateMicroStepSuggestion() {
+        val title = _uiState.value.taskDraftTitle.trim()
         if (title.isEmpty() || _uiState.value.assistantBusy) return
-        val mode = _uiState.value.mode
         val session = _uiState.value.session
-
         viewModelScope.launch {
-            _uiState.update { it.copy(assistantBusy = true, notice = "", assistantResponse = null) }
-            var result: AssistantResponse? = null
-            var noticeMsg = ""
-            if (supabase.isConfigured && session != null) {
-                result = supabase.invokeStepwiseAssistant(title, mode, session)
-                if (result == null) {
-                    noticeMsg = "The AI service is unavailable. Showing a built-in micro-step instead."
-                }
-            }
-            val finalResp = result ?: AssistantFallback.getDemoResponse(title, mode)
-            if (result == null && noticeMsg.isEmpty()) {
-                noticeMsg = if (session != null) {
-                    "Using the built-in helper for now."
-                } else {
-                    "Built-in micro-step helper ready. Connect your account for cloud AI."
-                }
-            }
+            _uiState.update { it.copy(assistantBusy = true) }
+            val result = if (supabase.isConfigured && session != null) {
+                supabase.invokeStepwiseAssistant(title, TaskMode.NEW_TASK, session)
+            } else null
+            val finalResp = result ?: AssistantFallback.getDemoResponse(title, TaskMode.NEW_TASK)
             _uiState.update {
                 it.copy(
                     assistantBusy = false,
                     assistantResponse = finalResp,
-                    notice = noticeMsg
+                    taskDraftMicroStep = it.taskDraftMicroStep.ifBlank { finalResp.theMicroStep }
                 )
             }
         }
     }
 
-    fun discardAssistantResult() {
-        _uiState.update { it.copy(assistantResponse = null) }
-    }
-
-    fun saveCurrentStep(hasNotificationPermission: Boolean) {
-        val resp = _uiState.value.assistantResponse ?: return
+    fun saveTaskFromSheet(hasNotificationPermission: Boolean) {
         val state = _uiState.value
-        val newTask = SavedTask(
-            id = UUID.randomUUID().toString(),
-            title = resp.optimizedTaskTitle,
-            mode = resp.mode,
-            microStep = resp.theMicroStep,
-            createdAt = Instant.now().toString(),
-            completed = false,
-            reminderTime = state.reminderTime24,
-            reminderAt = state.reminderAtIso,
-            estimateMinutes = state.estimateMinutes,
-            actualMinutes = null,
-            progressNote = ""
-        )
+        val rawTitle = state.taskDraftTitle.trim()
+        if (rawTitle.isEmpty()) return
+
+        val existing = state.editingTask
+        val microStep = state.taskDraftMicroStep.trim().ifEmpty {
+            AssistantFallback.getDemoResponse(rawTitle, TaskMode.NEW_TASK).theMicroStep
+        }
+        val category = state.taskDraftCategory.ifBlank {
+            AssistantFallback.autoTagTask(rawTitle, microStep)
+        }
+
+        val savedTask = if (existing != null) {
+            existing.copy(
+                title = rawTitle,
+                microStep = microStep,
+                category = category,
+                requiresVerification = state.taskDraftRequiresVerification,
+                reminderTime = state.reminderTime24,
+                reminderAt = state.reminderAtIso,
+                estimateMinutes = state.taskDraftEstimateMinutes
+            )
+        } else {
+            SavedTask(
+                id = UUID.randomUUID().toString(),
+                title = rawTitle,
+                mode = TaskMode.NEW_TASK,
+                microStep = microStep,
+                createdAt = Instant.now().toString(),
+                completed = false,
+                reminderTime = state.reminderTime24,
+                reminderAt = state.reminderAtIso,
+                estimateMinutes = state.taskDraftEstimateMinutes,
+                actualMinutes = null,
+                progressNote = "",
+                requiresVerification = state.taskDraftRequiresVerification,
+                category = category,
+                completedAt = null
+            )
+        }
 
         viewModelScope.launch {
-            repository.upsert(newTask, state.session?.userId)
-            persistRemoteTask(newTask)
-            if (!newTask.reminderAt.isNullOrBlank()) {
-                val triggerMs = runCatching { Instant.parse(newTask.reminderAt).toEpochMilli() }.getOrNull()
-                if (triggerMs != null && triggerMs > System.currentTimeMillis()) {
-                    if (hasNotificationPermission) {
-                        AlarmScheduler.scheduleTaskAlarm(appContext, newTask.id, newTask.title, triggerMs)
-                    }
+            repository.upsert(savedTask, state.session?.userId)
+            persistRemoteTask(savedTask)
+
+            AlarmScheduler.cancelTaskAlarm(appContext, savedTask.id)
+            if (!savedTask.completed && !savedTask.reminderAt.isNullOrBlank()) {
+                val triggerMs = runCatching { Instant.parse(savedTask.reminderAt).toEpochMilli() }.getOrNull()
+                if (triggerMs != null && triggerMs > System.currentTimeMillis() && hasNotificationPermission) {
+                    val label = savedTask.reminderTime?.let { format12h(it) }
+                    AlarmScheduler.scheduleTaskAlarm(appContext, savedTask.id, savedTask.title, triggerMs, label)
                 }
             }
-            val reminderNotice = if (!newTask.reminderAt.isNullOrBlank()) {
-                if (hasNotificationPermission) {
-                    "Reminder saved. Android will alert you on time."
-                } else {
-                    "Saved. Enable notification permission in Settings for lock-screen alarms."
-                }
-            } else {
-                "Saved. Your next step is ready when you are."
+
+            val timeText = savedTask.reminderTime?.let { format12h(it) }
+            val noticeMsg = when {
+                !savedTask.reminderAt.isNullOrBlank() && hasNotificationPermission && timeText != null ->
+                    "Alarm set for $timeText: \"${savedTask.title}\"."
+                !savedTask.reminderAt.isNullOrBlank() ->
+                    "Saved. Enable notification permission in Settings for exact alarms."
+                existing != null -> "Task updated."
+                else -> "Task added to your runway."
             }
+
             _uiState.update {
                 it.copy(
-                    assistantResponse = null,
-                    taskInput = "",
+                    taskSheetOpen = false,
+                    editingTask = null,
+                    taskDraftTitle = "",
+                    taskDraftMicroStep = "",
+                    taskDraftRequiresVerification = false,
                     reminderTime24 = null,
                     reminderAtIso = null,
-                    notice = reminderNotice
+                    assistantResponse = null,
+                    notice = noticeMsg
                 )
             }
         }
@@ -443,6 +614,26 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             repository.upsert(updated, _uiState.value.session?.userId)
             persistRemoteTask(updated)
             _uiState.update { it.copy(notice = "Time note saved. It is information, not a score.") }
+        }
+    }
+
+    /**
+     * CHANGE 2: Optional verification chosen per task.
+     * - requiresVerification == false: completes immediately with normal reward.
+     * - requiresVerification == true: starts focus timer & verification flow; completes only after verification succeeds.
+     */
+    fun onTaskCheckboxClicked(task: SavedTask) {
+        if (task.completed) return
+        if (!task.requiresVerification) {
+            viewModelScope.launch {
+                _uiState.update { it.copy(leavingTaskIds = it.leavingTaskIds + task.id) }
+                delay(320L)
+                _uiState.update { it.copy(leavingTaskIds = it.leavingTaskIds - task.id) }
+                giveReward(task, note = "")
+                _uiState.update { it.copy(notice = "Completed! Nice momentum.") }
+            }
+        } else {
+            beginFocus(task, fromCheckoff = true)
         }
     }
 
@@ -481,19 +672,14 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val session = _uiState.value.session
-        if (supabase.isConfigured && session == null) {
-            _uiState.update { it.copy(verificationError = "Sign in to use the AI task checker. Your task is still saved.") }
-            return
-        }
-
         viewModelScope.launch {
             _uiState.update { it.copy(verificationBusy = true, verificationError = "") }
 
             val approvedAndReason: Pair<Boolean, String> = if (supabase.isConfigured && session != null) {
                 when (val res = supabase.invokeVerifyTaskStart(target.title, target.microStep, note, session)) {
                     is SupabaseApi.VerifyResult.Failure -> {
-                        _uiState.update { it.copy(verificationBusy = false, verificationError = res.message) }
-                        return@launch
+                        val localRes = AssistantFallback.verifyLocally(target.title, target.microStep, note)
+                        localRes.approved to localRes.reason
                     }
                     is SupabaseApi.VerifyResult.Done -> res.approved to res.reason
                 }
@@ -519,7 +705,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
                     leavingTaskIds = it.leavingTaskIds + target.id
                 )
             }
-            delay(420L)
+            delay(360L)
             _uiState.update { it.copy(leavingTaskIds = it.leavingTaskIds - target.id) }
             giveReward(target, note)
             _uiState.update { it.copy(notice = "Verified. Your task is complete.") }
@@ -534,7 +720,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
 
         undoStreakSnapshot = state.streak to state.lastDay
         val nextStreak = when (state.lastDay) {
-            todayKey -> state.streak
+            todayKey -> state.streak.coerceAtLeast(1)
             yesterdayKey -> state.streak + 1
             else -> 1
         }
@@ -559,7 +745,11 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val combinedNote = listOf(item.progressNote, note).filter { it.isNotBlank() }.joinToString("\n\n")
-        val updated = item.copy(completed = true, progressNote = combinedNote)
+        val updated = item.copy(
+            completed = true,
+            progressNote = combinedNote,
+            completedAt = Instant.now().toString()
+        )
 
         val settings = state.rewardSettings
         val rewardLabel = if (bonus > 0) "+$basePoints points · +25 bonus!" else "+$basePoints points · nice work"
@@ -568,7 +758,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         if (settings.haptics) {
             AlarmSoundPlayer.vibrate(
                 appContext,
-                if (bonus > 0) longArrayOf(0, 25, 35, 25) else longArrayOf(0, 18)
+                if (bonus > 0) longArrayOf(0, 30, 40, 30) else longArrayOf(0, 22)
             )
         }
         if (settings.sound) {
@@ -626,7 +816,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
 
     fun undoCompletion() {
         val toRestore = _uiState.value.undoTask ?: return
-        val restored = toRestore.copy(completed = false)
+        val restored = toRestore.copy(completed = false, completedAt = null)
         val reward = lastRewardInfo?.takeIf { it.taskId == restored.id }
         val deduct = reward?.let { it.points + it.bonus } ?: 10
         val nextPoints = (_uiState.value.points - deduct).coerceAtLeast(0)
@@ -662,25 +852,28 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             if (!restored.reminderAt.isNullOrBlank()) {
                 val triggerMs = runCatching { Instant.parse(restored.reminderAt).toEpochMilli() }.getOrNull()
                 if (triggerMs != null && triggerMs > System.currentTimeMillis()) {
-                    AlarmScheduler.scheduleTaskAlarm(appContext, restored.id, restored.title, triggerMs)
+                    val label = restored.reminderTime?.let { format12h(it) }
+                    AlarmScheduler.scheduleTaskAlarm(appContext, restored.id, restored.title, triggerMs, label)
                 }
             }
         }
     }
 
     // Focus session
-    fun beginFocus(task: SavedTask) {
+    fun beginFocus(task: SavedTask, fromCheckoff: Boolean = false) {
         if (task.completed) return
         stopAlarmSound()
         currentFocusSessionId = "focus-${System.currentTimeMillis()}"
+        val defaultMins = (task.estimateMinutes ?: 25).coerceIn(5, 45)
         _uiState.update {
             it.copy(
                 focusTaskId = task.id,
-                focusMinutes = 25,
-                focusRemainingSeconds = 25 * 60,
+                focusMinutes = defaultMins,
+                focusRemainingSeconds = defaultMins * 60,
                 focusElapsedSeconds = 0,
                 focusPaused = false,
-                focusQualified = false,
+                focusQualified = fromCheckoff || task.requiresVerification,
+                focusStartedFromCheckoff = fromCheckoff,
                 focusMicroStep = task.microStep,
                 focusProgressNote = task.progressNote,
                 checkInOpen = false,
@@ -770,6 +963,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 focusTaskId = null,
                 focusPaused = false,
+                focusStartedFromCheckoff = false,
                 checkInOpen = false,
                 checkInExpired = false,
                 qualifiedFocusTasks = nextQualified
@@ -803,7 +997,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 if (finishedNow && _uiState.value.rewardSettings.notifySound) {
-                    AlarmSoundPlayer.playTone(freqHz = 780.0, durationMs = 260, volume = 0.25f)
+                    AlarmSoundPlayer.playCustomChime(appContext)
                 }
                 if (checkInTrigger) {
                     if (_uiState.value.rewardSettings.notifySound) {
@@ -849,35 +1043,190 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(checkInFrequency = minutes) }
     }
 
-    // Timed plan builder
+    // AI Task Breakdown / Timed Plan Builder
     fun updatePlanGoal(goal: String) {
         _uiState.update { it.copy(planGoal = goal) }
     }
 
     fun updatePlanTotalMinutes(minutes: Int) {
-        _uiState.update { it.copy(planTotalMinutes = minutes) }
+        val clamped = minutes.coerceIn(5, 480)
+        _uiState.update { it.copy(planTotalMinutes = clamped) }
+    }
+
+    fun togglePlanStrictTime(strict: Boolean) {
+        _uiState.update { it.copy(planStrictTimeLimit = strict) }
+    }
+
+    fun rescaleExistingPlan(newTotalMinutes: Int) {
+        val clamped = newTotalMinutes.coerceIn(5, 480)
+        val currentSteps = _uiState.value.planSteps
+        if (currentSteps.isEmpty()) {
+            _uiState.update { it.copy(planTotalMinutes = clamped) }
+            return
+        }
+        stopPlanSchedules()
+        planTimerJob?.cancel()
+        val rescaled = AssistantFallback.rescaleBreakdown(currentSteps, clamped)
+        val curIdx = _uiState.value.planCurrentIndex.coerceIn(0, rescaled.lastIndex)
+        val nextRem = rescaled[curIdx].minutes * 60_000L
+        planStepBaseDurationMs = nextRem
+        _uiState.update {
+            it.copy(
+                planTotalMinutes = clamped,
+                planSteps = rescaled,
+                planStatus = if (it.planStatus == PlanStatus.RUNNING) PlanStatus.PAUSED else it.planStatus,
+                planStepRemainingMs = nextRem,
+                planNotice = "Subtask durations adjusted to fit ${clamped}m."
+            )
+        }
+        persistBreakdownState()
+    }
+
+    fun breakDownExistingTask(task: SavedTask) {
+        stopPlanSchedules()
+        planTimerJob?.cancel()
+        val total = (task.estimateMinutes ?: 60).coerceIn(10, 240)
+        val steps = AssistantFallback.buildTimedPlanSteps(task.title, total, strictTimeLimit = false)
+        val firstMs = (steps.firstOrNull()?.minutes ?: 0) * 60_000L
+        planStepStartedAtMs = 0L
+        planStepBaseDurationMs = firstMs
+        _uiState.update {
+            it.copy(
+                tab = AppTab.PLAN,
+                planGoal = task.title,
+                planTotalMinutes = total,
+                planParentTaskId = task.id,
+                planSteps = steps,
+                planCurrentIndex = 0,
+                planStatus = PlanStatus.READY,
+                planStepRemainingMs = firstMs,
+                planNotice = "Breakdown ready for \"${task.title}\". Customize steps or tap Start."
+            )
+        }
+        persistBreakdownState()
     }
 
     fun createTimedPlan() {
         val goal = _uiState.value.planGoal.trim()
         if (goal.isEmpty()) {
-            _uiState.update { it.copy(planNotice = "Describe the task first.") }
+            _uiState.update { it.copy(planNotice = "Describe the task you want to break down first.") }
             return
         }
         stopPlanSchedules()
         planTimerJob?.cancel()
-        val steps = AssistantFallback.buildTimedPlanSteps(goal, _uiState.value.planTotalMinutes)
+        val steps = AssistantFallback.buildTimedPlanSteps(
+            task = goal,
+            totalMinutes = _uiState.value.planTotalMinutes,
+            strictTimeLimit = _uiState.value.planStrictTimeLimit
+        )
+        val firstMs = (steps.firstOrNull()?.minutes ?: 0) * 60_000L
         planStepStartedAtMs = 0L
-        planPausedElapsedMs = 0L
+        planStepBaseDurationMs = firstMs
         _uiState.update {
             it.copy(
                 planSteps = steps,
                 planCurrentIndex = 0,
                 planStatus = PlanStatus.READY,
-                planStepRemainingMs = (steps.firstOrNull()?.minutes ?: 0) * 60_000L,
-                planNotice = "Plan created. Adjust any step, then start the plan."
+                planStepRemainingMs = firstMs,
+                planNotice = "Breakdown ready. Edit, reorder, or add steps anytime, then tap Start."
             )
         }
+        persistBreakdownState()
+    }
+
+    fun addPlanStep(title: String, description: String, minutes: Int) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return
+        val newStep = PlanStep(
+            id = UUID.randomUUID().toString(),
+            title = cleanTitle,
+            description = description.trim(),
+            minutes = minutes.coerceIn(1, 240),
+            kind = PlanStepKind.WORK
+        )
+        val updated = _uiState.value.planSteps + newStep
+        _uiState.update {
+            it.copy(
+                planSteps = updated,
+                planTotalMinutes = updated.sumOf { s -> s.minutes }.coerceIn(5, 480),
+                planNotice = "Added step \"$cleanTitle\"."
+            )
+        }
+        persistBreakdownState()
+    }
+
+    fun editPlanStep(index: Int, title: String, description: String, minutes: Int) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) return
+        val clamped = minutes.coerceIn(1, 240)
+        val updated = _uiState.value.planSteps.mapIndexed { i, step ->
+            if (i == index) step.copy(title = cleanTitle, description = description.trim(), minutes = clamped) else step
+        }
+        val wasRunning = _uiState.value.planStatus == PlanStatus.RUNNING
+        if (wasRunning && index == _uiState.value.planCurrentIndex) {
+            stopPlanSchedules()
+            planTimerJob?.cancel()
+        }
+        val newRem = if (index == _uiState.value.planCurrentIndex) clamped * 60_000L else _uiState.value.planStepRemainingMs
+        if (index == _uiState.value.planCurrentIndex) planStepBaseDurationMs = newRem
+        _uiState.update {
+            it.copy(
+                planSteps = updated,
+                planTotalMinutes = updated.sumOf { s -> s.minutes }.coerceIn(5, 480),
+                planStatus = if (wasRunning && index == it.planCurrentIndex) PlanStatus.PAUSED else it.planStatus,
+                planStepRemainingMs = newRem,
+                planNotice = "Step updated."
+            )
+        }
+        persistBreakdownState()
+    }
+
+    fun deletePlanStep(index: Int) {
+        val current = _uiState.value.planSteps
+        if (index !in current.indices || current.size <= 1) return
+        stopPlanSchedules()
+        planTimerJob?.cancel()
+        val updated = current.filterIndexed { i, _ -> i != index }
+        val nextIdx = _uiState.value.planCurrentIndex.coerceIn(0, updated.lastIndex)
+        val nextRem = updated[nextIdx].minutes * 60_000L
+        planStepBaseDurationMs = nextRem
+        _uiState.update {
+            it.copy(
+                planSteps = updated,
+                planCurrentIndex = nextIdx,
+                planTotalMinutes = updated.sumOf { s -> s.minutes }.coerceIn(5, 480),
+                planStatus = if (it.planStatus == PlanStatus.RUNNING) PlanStatus.PAUSED else it.planStatus,
+                planStepRemainingMs = nextRem,
+                planNotice = "Step removed."
+            )
+        }
+        persistBreakdownState()
+    }
+
+    fun movePlanStep(index: Int, delta: Int) {
+        val list = _uiState.value.planSteps.toMutableList()
+        val target = index + delta
+        if (index !in list.indices || target !in list.indices) return
+        stopPlanSchedules()
+        planTimerJob?.cancel()
+        val item = list.removeAt(index)
+        list.add(target, item)
+        val newCurrent = when (_uiState.value.planCurrentIndex) {
+            index -> target
+            target -> index
+            else -> _uiState.value.planCurrentIndex
+        }
+        val nextRem = list[newCurrent].minutes * 60_000L
+        planStepBaseDurationMs = nextRem
+        _uiState.update {
+            it.copy(
+                planSteps = list,
+                planCurrentIndex = newCurrent,
+                planStatus = if (it.planStatus == PlanStatus.RUNNING) PlanStatus.PAUSED else it.planStatus,
+                planStepRemainingMs = nextRem
+            )
+        }
+        persistBreakdownState()
     }
 
     fun changePlanStepMinutes(index: Int, minutes: Int) {
@@ -890,48 +1239,72 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             stopPlanSchedules()
             planTimerJob?.cancel()
         }
+        val nextRem = if (index == _uiState.value.planCurrentIndex) clamped * 60_000L else _uiState.value.planStepRemainingMs
+        if (index == _uiState.value.planCurrentIndex) planStepBaseDurationMs = nextRem
         _uiState.update {
             it.copy(
                 planSteps = updated,
+                planTotalMinutes = updated.sumOf { s -> s.minutes }.coerceIn(5, 480),
                 planStatus = if (wasRunning) PlanStatus.PAUSED else it.planStatus,
-                planStepRemainingMs = if (index == it.planCurrentIndex) clamped * 60_000L else it.planStepRemainingMs,
-                planNotice = if (wasRunning) "Timing changed. Start again to apply the new schedule." else it.planNotice
+                planStepRemainingMs = nextRem,
+                planNotice = if (wasRunning) "Timing changed. Start again to apply." else it.planNotice
             )
         }
+        persistBreakdownState()
     }
 
     fun startOrResumeTimedPlan(hasNotificationPermission: Boolean) {
         val steps = _uiState.value.planSteps
         if (steps.isEmpty()) return
-        val startIndex = if (_uiState.value.planStatus == PlanStatus.FINISHED) 0 else _uiState.value.planCurrentIndex
+        val wasFinished = _uiState.value.planStatus == PlanStatus.FINISHED
+        val workingSteps = if (wasFinished) steps.map { it.copy(completed = false) } else steps
+        val startIndex = if (wasFinished) {
+            0
+        } else {
+            val cur = _uiState.value.planCurrentIndex.coerceIn(0, workingSteps.lastIndex)
+            if (workingSteps[cur].completed) {
+                workingSteps.indexOfFirst { !it.completed }.takeIf { it >= 0 } ?: 0
+            } else cur
+        }
+
+        val initialRemainingMs = if (!wasFinished && _uiState.value.planStatus == PlanStatus.PAUSED && _uiState.value.planStepRemainingMs > 1000L) {
+            _uiState.value.planStepRemainingMs
+        } else {
+            workingSteps[startIndex].minutes * 60_000L
+        }
+
         stopPlanSchedules()
         val now = System.currentTimeMillis()
         planStepStartedAtMs = now
-        planPausedElapsedMs = 0L
+        planStepBaseDurationMs = initialRemainingMs
 
         if (hasNotificationPermission) {
-            var offsetMs = 0L
+            var offsetMs = initialRemainingMs
             val scheduleList = mutableListOf<Pair<String, Long>>()
-            for (i in startIndex until steps.size) {
-                val step = steps[i]
-                scheduleList.add(step.title to (now + offsetMs))
-                offsetMs += step.minutes * 60_000L
+            scheduleList.add(workingSteps[startIndex].title to (now + offsetMs))
+            for (i in (startIndex + 1) until workingSteps.size) {
+                if (!workingSteps[i].completed) {
+                    offsetMs += workingSteps[i].minutes * 60_000L
+                    scheduleList.add(workingSteps[i].title to (now + offsetMs))
+                }
             }
             scheduledPlanIds = AlarmScheduler.schedulePlanStepNotifications(appContext, scheduleList)
         }
 
         _uiState.update {
             it.copy(
+                planSteps = workingSteps,
                 planCurrentIndex = startIndex,
                 planStatus = PlanStatus.RUNNING,
-                planStepRemainingMs = steps[startIndex].minutes * 60_000L,
+                planStepRemainingMs = initialRemainingMs,
                 planNotice = if (hasNotificationPermission) {
-                    "Plan started. Step reminders are scheduled."
+                    "Focused on step ${startIndex + 1}. You'll get a gentle chime when this block ends."
                 } else {
-                    "Plan started. Allow notifications for background step reminders."
+                    "Timer running. Enable notifications in Settings for background step alerts."
                 }
             )
         }
+        persistBreakdownState()
         startPlanTicker()
     }
 
@@ -939,12 +1312,94 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.planStatus != PlanStatus.RUNNING) return
         planTimerJob?.cancel()
         stopPlanSchedules()
-        planPausedElapsedMs = (System.currentTimeMillis() - planStepStartedAtMs).coerceAtLeast(0L)
+        val elapsed = (System.currentTimeMillis() - planStepStartedAtMs).coerceAtLeast(0L)
+        val remaining = (planStepBaseDurationMs - elapsed).coerceAtLeast(0L)
+        planStepBaseDurationMs = remaining
         _uiState.update {
             it.copy(
                 planStatus = PlanStatus.PAUSED,
-                planNotice = "Paused. Start again to reschedule the remaining reminders."
+                planStepRemainingMs = remaining,
+                planNotice = "Paused. Your progress is saved."
             )
+        }
+        persistBreakdownState()
+    }
+
+    fun completeCurrentPlanStep(hasNotificationPermission: Boolean) {
+        val state = _uiState.value
+        val idx = state.planCurrentIndex
+        if (idx !in state.planSteps.indices) return
+        completePlanStepAt(idx, hasNotificationPermission)
+    }
+
+    fun completePlanStepAt(index: Int, hasNotificationPermission: Boolean) {
+        val state = _uiState.value
+        if (index !in state.planSteps.indices) return
+        stopPlanSchedules()
+        planTimerJob?.cancel()
+
+        val wasCompleted = state.planSteps[index].completed
+        val updated = state.planSteps.mapIndexed { i, step ->
+            if (i == index) step.copy(completed = !wasCompleted) else step
+        }
+
+        if (!wasCompleted) {
+            if (state.rewardSettings.haptics) {
+                AlarmSoundPlayer.vibrate(appContext, longArrayOf(0, 22))
+            }
+            if (state.rewardSettings.sound) {
+                AlarmSoundPlayer.playTone(freqHz = 720.0, durationMs = 150, volume = 0.2f)
+            }
+            val nextPts = state.points + 5
+            prefs.points = nextPts
+            _uiState.update { it.copy(points = nextPts, rewardToast = "+5 pts · subtask done!") }
+            viewModelScope.launch {
+                delay(1800L)
+                _uiState.update { cur -> if (cur.rewardToast == "+5 pts · subtask done!") cur.copy(rewardToast = "") else cur }
+            }
+        }
+
+        val nextIncompleteIdx = updated.indexOfFirst { !it.completed }
+        if (nextIncompleteIdx == -1) {
+            // All subtasks complete!
+            if (state.rewardSettings.sound) {
+                AlarmSoundPlayer.playCustomChime(appContext)
+            }
+            _uiState.update {
+                it.copy(
+                    planSteps = updated,
+                    planStatus = PlanStatus.FINISHED,
+                    planStepRemainingMs = 0L,
+                    planNotice = "All subtasks finished! Amazing focus."
+                )
+            }
+            persistBreakdownState()
+            // Also complete parent task if linked & doesn't require essay verification
+            val parentId = state.planParentTaskId
+            if (parentId != null) {
+                val parent = state.tasks.firstOrNull { it.id == parentId && !it.completed }
+                if (parent != null && !parent.requiresVerification) {
+                    giveReward(parent, "Completed via AI Task Breakdown")
+                }
+            }
+            return
+        }
+
+        val nextRem = updated[nextIncompleteIdx].minutes * 60_000L
+        val wasRunning = state.planStatus == PlanStatus.RUNNING
+        planStepBaseDurationMs = nextRem
+        _uiState.update {
+            it.copy(
+                planSteps = updated,
+                planCurrentIndex = nextIncompleteIdx,
+                planStepRemainingMs = nextRem,
+                planStatus = if (wasRunning) PlanStatus.RUNNING else PlanStatus.PAUSED,
+                planNotice = "Step completed! Moving to: ${updated[nextIncompleteIdx].title}"
+            )
+        }
+        persistBreakdownState()
+        if (wasRunning) {
+            startOrResumeTimedPlan(hasNotificationPermission)
         }
     }
 
@@ -952,35 +1407,43 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         val state = _uiState.value
         stopPlanSchedules()
         planTimerJob?.cancel()
-        if (state.planCurrentIndex >= state.planSteps.lastIndex) {
+        val nextIdx = ((state.planCurrentIndex + 1) until state.planSteps.size)
+            .firstOrNull { !state.planSteps[it].completed }
+        if (nextIdx == null) {
             _uiState.update { it.copy(planStatus = PlanStatus.FINISHED, planStepRemainingMs = 0L) }
+            persistBreakdownState()
             return
         }
-        val nextIdx = state.planCurrentIndex + 1
-        planPausedElapsedMs = 0L
+        val nextRem = state.planSteps[nextIdx].minutes * 60_000L
+        planStepBaseDurationMs = nextRem
         _uiState.update {
             it.copy(
                 planCurrentIndex = nextIdx,
                 planStatus = PlanStatus.PAUSED,
-                planStepRemainingMs = state.planSteps[nextIdx].minutes * 60_000L,
-                planNotice = "Skipped ahead. Start the plan again to reschedule remaining reminders."
+                planStepRemainingMs = nextRem,
+                planNotice = "Skipped ahead to step ${nextIdx + 1}. Tap Resume when ready."
             )
         }
+        persistBreakdownState()
     }
 
     fun stopTimedPlan() {
         stopPlanSchedules()
         planTimerJob?.cancel()
         planStepStartedAtMs = 0L
-        planPausedElapsedMs = 0L
+        val resetSteps = _uiState.value.planSteps.map { it.copy(completed = false) }
+        val firstRem = (resetSteps.firstOrNull()?.minutes ?: 0) * 60_000L
+        planStepBaseDurationMs = firstRem
         _uiState.update {
             it.copy(
+                planSteps = resetSteps,
                 planStatus = PlanStatus.STOPPED,
                 planCurrentIndex = 0,
-                planStepRemainingMs = (it.planSteps.firstOrNull()?.minutes ?: 0) * 60_000L,
-                planNotice = "Plan stopped. Your steps are still here so you can restart."
+                planStepRemainingMs = firstRem,
+                planNotice = "Plan reset. Your steps are saved here anytime."
             )
         }
+        persistBreakdownState()
     }
 
     private fun startPlanTicker() {
@@ -992,28 +1455,24 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
                 if (s.planStatus != PlanStatus.RUNNING) break
                 val step = s.planSteps.getOrNull(s.planCurrentIndex) ?: break
                 val elapsed = (System.currentTimeMillis() - planStepStartedAtMs).coerceAtLeast(0L)
-                val remaining = (step.minutes * 60_000L - elapsed).coerceAtLeast(0L)
+                val remaining = (planStepBaseDurationMs - elapsed).coerceAtLeast(0L)
                 if (remaining <= 0L) {
-                    if (s.planCurrentIndex >= s.planSteps.lastIndex) {
-                        stopPlanSchedules()
-                        _uiState.update {
-                            it.copy(
-                                planStatus = PlanStatus.FINISHED,
-                                planStepRemainingMs = 0L,
-                                planNotice = "Plan complete. You made it through the steps."
-                            )
-                        }
-                        break
-                    } else {
-                        val nextIdx = s.planCurrentIndex + 1
-                        planStepStartedAtMs = System.currentTimeMillis()
-                        _uiState.update {
-                            it.copy(
-                                planCurrentIndex = nextIdx,
-                                planStepRemainingMs = s.planSteps[nextIdx].minutes * 60_000L
-                            )
-                        }
+                    if (s.rewardSettings.notifySound) {
+                        AlarmSoundPlayer.playCustomChime(appContext)
                     }
+                    if (s.rewardSettings.haptics) {
+                        AlarmSoundPlayer.vibrate(appContext, longArrayOf(0, 140, 80, 140))
+                    }
+                    // Pause at 00:00 and invite user to mark complete, continue, or move next
+                    _uiState.update {
+                        it.copy(
+                            planStatus = PlanStatus.PAUSED,
+                            planStepRemainingMs = 0L,
+                            planNotice = "Time's up for \"${step.title}\"! Complete step, add time, or skip to next."
+                        )
+                    }
+                    persistBreakdownState()
+                    break
                 } else {
                     _uiState.update { it.copy(planStepRemainingMs = remaining) }
                 }
@@ -1024,6 +1483,35 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopPlanSchedules() {
         AlarmScheduler.cancelPlanStepNotifications(appContext, scheduledPlanIds)
         scheduledPlanIds = emptyList()
+    }
+
+    // Quick Notes
+    fun updateQuickNoteInput(text: String) {
+        _uiState.update { it.copy(quickNoteInput = text) }
+    }
+
+    fun addQuickNote() {
+        val text = _uiState.value.quickNoteInput.trim()
+        if (text.isEmpty()) return
+        val note = QuickNote(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            createdAt = Instant.now().toString()
+        )
+        val updated = listOf(note) + _uiState.value.quickNotes
+        prefs.saveQuickNotes(updated)
+        _uiState.update { it.copy(quickNotes = updated, quickNoteInput = "") }
+    }
+
+    fun deleteQuickNote(noteId: String) {
+        val updated = _uiState.value.quickNotes.filterNot { it.id == noteId }
+        prefs.saveQuickNotes(updated)
+        _uiState.update { it.copy(quickNotes = updated) }
+    }
+
+    fun convertQuickNoteToTask(note: QuickNote) {
+        deleteQuickNote(note.id)
+        openAddTaskSheet(initialTitle = note.text)
     }
 
     // Buddy management
@@ -1072,7 +1560,7 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
 
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Vinai · accountability buddy")
+            putExtra(Intent.EXTRA_SUBJECT, "வினை · accountability buddy")
             putExtra(Intent.EXTRA_TEXT, "${target.ownerName} invited you to be their buddy: $link")
         }
         runCatching {
@@ -1118,68 +1606,57 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.buddy == null || !supabase.isConfigured) return
         buddyOwnerPollJob = viewModelScope.launch {
             while (true) {
-                val current = _uiState.value.buddy ?: break
-                val result = supabase.pollOwner(current)
-                if (result != null) {
-                    val next = current.copy(
-                        state = result.state,
-                        lastCheerId = maxOf(current.lastCheerId, result.lastId)
-                    )
-                    if (next != current) {
-                        prefs.saveLocalBuddy(next)
-                        _uiState.update { it.copy(buddy = next) }
+                val cur = _uiState.value.buddy ?: break
+                val res = supabase.pollOwner(cur)
+                if (res != null) {
+                    var updated = cur
+                    if (res.state != cur.state) {
+                        updated = updated.copy(state = res.state)
                     }
-                    if (result.emojis.isNotEmpty()) {
-                        val emoji = result.emojis.last()
-                        _uiState.update {
-                            it.copy(
-                                rewardToast = "Your buddy sent a cheer $emoji",
-                                cheerFloat = emoji
-                            )
-                        }
-                        launch {
-                            delay(1800L)
-                            _uiState.update { it.copy(cheerFloat = "") }
-                        }
-                        launch {
-                            delay(2400L)
-                            _uiState.update { it.copy(rewardToast = "") }
-                        }
+                    if (res.lastId > cur.lastCheerId) {
+                        updated = updated.copy(lastCheerId = res.lastId)
+                    }
+                    if (updated != cur) {
+                        prefs.saveLocalBuddy(updated)
+                        _uiState.update { it.copy(buddy = updated) }
+                    }
+                    if (res.emojis.isNotEmpty()) {
+                        _uiState.update { it.copy(cheerFloat = res.emojis.last()) }
+                        delay(1800L)
+                        _uiState.update { it.copy(cheerFloat = "") }
                     }
                 }
-                delay(8000L)
+                delay(5000L)
             }
         }
     }
 
-    // Deep-linked BuddyView
-    fun openBuddyViewer(rawInput: String) {
-        val token = extractBuddyToken(rawInput) ?: return
-        val accepted = prefs.isBuddyAccepted(token)
+    fun openBuddyViewer(rawTokenOrLink: String) {
+        val token = extractBuddyToken(rawTokenOrLink) ?: return
         _uiState.update {
             it.copy(
                 incomingBuddyToken = token,
                 buddyViewLoaded = false,
-                buddyViewData = null,
-                buddyViewAccepted = accepted,
+                buddyViewAccepted = prefs.isBuddyAccepted(token),
                 buddyViewDeclined = false,
                 buddyViewFeedback = ""
             )
         }
         buddyViewPollJob?.cancel()
         buddyViewPollJob = viewModelScope.launch {
-            while (true) {
-                val activeToken = _uiState.value.incomingBuddyToken ?: break
-                val data = supabase.fetchBuddyView(activeToken)
+            while (_uiState.value.incomingBuddyToken == token) {
+                val data = supabase.fetchBuddyView(token)
                 _uiState.update { it.copy(buddyViewData = data, buddyViewLoaded = true) }
-                delay(if (_uiState.value.buddyViewAccepted) 5000L else 15000L)
+                delay(4000L)
             }
         }
     }
 
     fun closeBuddyViewer() {
         buddyViewPollJob?.cancel()
-        _uiState.update { it.copy(incomingBuddyToken = null) }
+        _uiState.update {
+            it.copy(incomingBuddyToken = null, buddyViewData = null, buddyViewLoaded = false, buddyViewFeedback = "")
+        }
     }
 
     fun acceptBuddyViewerInvite() {
@@ -1188,10 +1665,11 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             val ok = supabase.acceptBuddyInvite(token)
             if (ok) {
                 prefs.setBuddyAccepted(token, true)
-                _uiState.update { it.copy(buddyViewAccepted = true) }
+                val refreshed = supabase.fetchBuddyView(token)
+                _uiState.update {
+                    it.copy(buddyViewAccepted = true, buddyViewData = refreshed)
+                }
             }
-            val refreshed = supabase.fetchBuddyView(token)
-            _uiState.update { it.copy(buddyViewData = refreshed, buddyViewLoaded = true) }
         }
     }
 
@@ -1219,16 +1697,30 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Ringing Alarm Modal
-    fun triggerRingingAlarm(title: String, taskId: String?) {
-        _uiState.update { it.copy(ringingAlarm = RingingAlarmState(title, taskId)) }
+    fun triggerRingingAlarm(
+        title: String,
+        taskId: String?,
+        timeLabel: String? = null,
+        isPlanStep: Boolean = false
+    ) {
+        _uiState.update {
+            it.copy(ringingAlarm = RingingAlarmState(title, taskId, timeLabel, isPlanStep))
+        }
         alarmBeepJob?.cancel()
         alarmBeepJob = viewModelScope.launch {
-            AlarmSoundPlayer.vibrate(appContext, longArrayOf(0, 180, 120, 180))
+            AlarmSoundPlayer.vibrate(appContext, longArrayOf(0, 220, 120, 220))
             while (true) {
-                AlarmSoundPlayer.playTone(freqHz = 740.0, durationMs = 320, volume = 0.25f)
-                delay(1500L)
+                AlarmSoundPlayer.playCustomChime(appContext)
+                delay(2400L)
             }
         }
+    }
+
+    fun dismissRingingAlarm() {
+        if (_uiState.value.rewardSettings.haptics) {
+            AlarmSoundPlayer.vibrate(appContext, longArrayOf(0, 25))
+        }
+        stopAlarmSound()
     }
 
     fun stopAlarmSound() {
@@ -1237,14 +1729,18 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(ringingAlarm = null) }
     }
 
-    fun snoozeRingingAlarm() {
+    fun snoozeRingingAlarm(minutes: Int = 5) {
         val taskId = _uiState.value.ringingAlarm?.taskId
+        if (_uiState.value.rewardSettings.haptics) {
+            AlarmSoundPlayer.vibrate(appContext, longArrayOf(0, 20, 40, 20))
+        }
         stopAlarmSound()
         if (taskId.isNullOrBlank()) return
         val original = _uiState.value.tasks.firstOrNull { it.id == taskId } ?: return
-        val snoozeInstant = Instant.now().plusSeconds(5 * 60L)
+        val snoozeInstant = Instant.now().plusSeconds(minutes * 60L)
         val localTime = snoozeInstant.atZone(ZoneId.systemDefault()).toLocalTime()
         val time24 = DateTimeFormatter.ofPattern("HH:mm").format(localTime)
+        val timeLabel = format12h(time24)
         val updated = original.copy(
             reminderAt = snoozeInstant.toString(),
             reminderTime = time24
@@ -1252,8 +1748,8 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.upsert(updated, _uiState.value.session?.userId)
             persistRemoteTask(updated)
-            AlarmScheduler.scheduleTaskAlarm(appContext, updated.id, updated.title, snoozeInstant.toEpochMilli())
-            _uiState.update { it.copy(notice = "Snoozed for five minutes.") }
+            AlarmScheduler.scheduleTaskAlarm(appContext, updated.id, updated.title, snoozeInstant.toEpochMilli(), timeLabel)
+            _uiState.update { it.copy(notice = "Snoozed for $minutes minutes (until $timeLabel).") }
         }
     }
 
@@ -1292,6 +1788,15 @@ class VinaiViewModel(application: Application) : AndroidViewModel(application) {
             target = target.plusDays(1)
         }
         return target.toInstant().toString()
+    }
+
+    private fun format12h(time24: String): String {
+        val parts = time24.split(":")
+        val hh = parts.getOrNull(0)?.toIntOrNull() ?: 9
+        val mm = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        val period = if (hh >= 12) "PM" else "AM"
+        val h12 = if (hh % 12 == 0) 12 else hh % 12
+        return "$h12:${mm.toString().padStart(2, '0')} $period"
     }
 
     override fun onCleared() {

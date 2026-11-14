@@ -9,7 +9,8 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.media.RingtoneManager
+import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -22,20 +23,24 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 object AlarmScheduler {
-    const val CHANNEL_ID = "adhd-gentle-alarms"
+    const val CHANNEL_ID = "vinai-exact-alarms-v2"
     const val EXTRA_TASK_ID = "extra_task_id"
     const val EXTRA_TASK_TITLE = "extra_task_title"
     const val EXTRA_REPEAT_INDEX = "extra_repeat_index"
     const val EXTRA_IS_PLAN_STEP = "extra_is_plan_step"
+    const val EXTRA_TIME_LABEL = "extra_time_label"
 
     private const val REPEAT_EVERY_MS = 5L * 60L * 1000L
-    private const val MAX_REPEATS = 24
+    private const val MAX_REPEATS = 12
+
+    fun getCustomSoundUri(context: Context): Uri =
+        Uri.parse("android.resource://${context.packageName}/${R.raw.vinai_alarm_chime}")
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val soundUri = getCustomSoundUri(context)
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -48,8 +53,9 @@ object AlarmScheduler {
                 description = context.getString(R.string.alarm_channel_desc)
                 enableVibration(true)
                 enableLights(true)
-                lightColor = 0xFFA7EF79.toInt()
+                lightColor = 0xFFE6EBF2.toInt()
                 setSound(soundUri, attrs)
+                setBypassDnd(true)
             }
             manager.createNotificationChannel(channel)
         }
@@ -61,7 +67,13 @@ object AlarmScheduler {
         return List(MAX_REPEATS) { i -> base * 30 + i }
     }
 
-    fun scheduleTaskAlarm(context: Context, taskId: String, title: String, triggerAtMillis: Long) {
+    fun scheduleTaskAlarm(
+        context: Context,
+        taskId: String,
+        title: String,
+        triggerAtMillis: Long,
+        timeLabel: String? = null
+    ) {
         createNotificationChannel(context)
         cancelTaskAlarm(context, taskId)
 
@@ -78,9 +90,18 @@ object AlarmScheduler {
                 taskId = taskId,
                 title = title,
                 repeatIndex = index,
-                isPlanStep = false
+                isPlanStep = false,
+                timeLabel = timeLabel
             )
-            scheduleExactOrInexact(alarmManager, at, pending)
+            scheduleExactOrInexact(
+                context = context,
+                alarmManager = alarmManager,
+                triggerAtMs = at,
+                pending = pending,
+                useAlarmClock = (index == 0),
+                taskId = taskId,
+                title = title
+            )
         }
     }
 
@@ -118,9 +139,18 @@ object AlarmScheduler {
                 taskId = "plan_step_$reqCode",
                 title = title,
                 repeatIndex = index,
-                isPlanStep = true
+                isPlanStep = true,
+                timeLabel = null
             )
-            scheduleExactOrInexact(alarmManager, triggerAtMs, pending)
+            scheduleExactOrInexact(
+                context = context,
+                alarmManager = alarmManager,
+                triggerAtMs = triggerAtMs,
+                pending = pending,
+                useAlarmClock = false,
+                taskId = "plan_step_$reqCode",
+                title = title
+            )
         }
         return ids
     }
@@ -151,9 +181,19 @@ object AlarmScheduler {
             val targetMs = runCatching { Instant.parse(task.reminderAt).toEpochMilli() }.getOrNull() ?: return@forEach
             val chainEnd = targetMs + (MAX_REPEATS - 1) * REPEAT_EVERY_MS
             if (chainEnd > now) {
-                scheduleTaskAlarm(context, task.id, task.title, targetMs)
+                val label = task.reminderTime?.let { format12h(it) }
+                scheduleTaskAlarm(context, task.id, task.title, targetMs, label)
             }
         }
+    }
+
+    private fun format12h(time24: String): String {
+        val parts = time24.split(":")
+        val hh = parts.getOrNull(0)?.toIntOrNull() ?: return time24
+        val mm = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        val period = if (hh >= 12) "PM" else "AM"
+        val h12 = if (hh % 12 == 0) 12 else hh % 12
+        return "$h12:${mm.toString().padStart(2, '0')} $period"
     }
 
     fun canScheduleExact(context: Context): Boolean {
@@ -162,10 +202,21 @@ object AlarmScheduler {
         return alarmManager.canScheduleExactAlarms()
     }
 
-    private fun scheduleExactOrInexact(alarmManager: AlarmManager, triggerAtMs: Long, pending: PendingIntent) {
+    private fun scheduleExactOrInexact(
+        context: Context,
+        alarmManager: AlarmManager,
+        triggerAtMs: Long,
+        pending: PendingIntent,
+        useAlarmClock: Boolean,
+        taskId: String,
+        title: String
+    ) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) {
                 alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMs, pending)
+            } else if (useAlarmClock) {
+                val showIntent = buildOpenTaskIntent(context, taskId, title)
+                alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAtMs, showIntent), pending)
             } else {
                 alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMs, pending)
             }
@@ -180,13 +231,15 @@ object AlarmScheduler {
         taskId: String,
         title: String,
         repeatIndex: Int,
-        isPlanStep: Boolean
+        isPlanStep: Boolean,
+        timeLabel: String?
     ): PendingIntent {
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             putExtra(EXTRA_TASK_ID, taskId)
             putExtra(EXTRA_TASK_TITLE, title)
             putExtra(EXTRA_REPEAT_INDEX, repeatIndex)
             putExtra(EXTRA_IS_PLAN_STEP, isPlanStep)
+            if (!timeLabel.isNullOrBlank()) putExtra(EXTRA_TIME_LABEL, timeLabel)
             putExtra("request_code", requestCode)
         }
         return PendingIntent.getBroadcast(
@@ -197,11 +250,12 @@ object AlarmScheduler {
         )
     }
 
-    fun buildOpenTaskIntent(context: Context, taskId: String, title: String): PendingIntent {
+    fun buildOpenTaskIntent(context: Context, taskId: String, title: String, timeLabel: String? = null): PendingIntent {
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_TASK_ID, taskId)
             putExtra(EXTRA_TASK_TITLE, title)
+            if (!timeLabel.isNullOrBlank()) putExtra(EXTRA_TIME_LABEL, timeLabel)
         }
         return PendingIntent.getActivity(
             context,
@@ -213,6 +267,30 @@ object AlarmScheduler {
 }
 
 object AlarmSoundPlayer {
+    fun playCustomChime(context: Context) {
+        Thread {
+            val played = runCatching {
+                val player = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    setDataSource(context.applicationContext, AlarmScheduler.getCustomSoundUri(context))
+                    prepare()
+                    start()
+                }
+                player.setOnCompletionListener { it.release() }
+                true
+            }.getOrDefault(false)
+
+            if (!played) {
+                playTone(freqHz = 740.0, durationMs = 320, volume = 0.25f)
+            }
+        }.start()
+    }
+
     fun playTone(freqHz: Double = 740.0, durationMs: Int = 320, volume: Float = 0.25f) {
         Thread {
             runCatching {
