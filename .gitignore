@@ -7,3 +7,8 @@ dist
 *.tsbuildinfo
 *-check.png
 *.apk
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties

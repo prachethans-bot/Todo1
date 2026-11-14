@@ -34,10 +34,25 @@ jobs:
         with:
           gradle-version: 9.3.1
 
+      - name: Accept Android SDK licenses and ensure API 36 SDK
+        run: |
+          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDK_MANAGER="$(find "$ANDROID_SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)"
+          yes | "$SDK_MANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDK_MANAGER" "platforms;android-36" "build-tools;35.0.1"
+
       - name: Prepare signing keystore and optional secrets
         run: |
-          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
-            base64 --decode debug.keystore.base64 > debug.keystore
+          rm -rf .gradle/9.3.1 .gradle/buildOutputCleanup
+          if [ ! -f "debug.keystore" ]; then
+            if [ -f "debug.keystore.base64" ]; then
+              base64 --decode debug.keystore.base64 > debug.keystore
+            else
+              keytool -genkeypair -v -keystore debug.keystore \
+                -storepass android -alias androiddebugkey -keypass android \
+                -keyalg RSA -keysize 2048 -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
           fi
           if [ ! -f ".env" ]; then
             cp .env.example .env
@@ -53,7 +68,7 @@ jobs:
           fi
 
       - name: Build Android APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Verify APK package, alignment, and signature
         run: |
